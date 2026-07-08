@@ -24,8 +24,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleIdentifier</key><string>com.techjuicelab.aishot</string>
 	<key>CFBundleName</key><string>AIShot</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>1.0</string>
-	<key>CFBundleVersion</key><string>1</string>
+	<key>CFBundleShortVersionString</key><string>1.1</string>
+	<key>CFBundleVersion</key><string>2</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSMinimumSystemVersion</key><string>14.0</string>
 	<key>LSUIElement</key><true/>
@@ -52,6 +52,8 @@ fi
 codesign --force --sign - "$APP"
 
 # Install to ~/Applications and register with LaunchServices
+NEW_CDHASH=$(codesign -dvvv "$APP" 2>&1 | awk -F= '/^CDHash/{print $2}')
+OLD_CDHASH=$(codesign -dvvv "$HOME/Applications/$APP" 2>&1 | awk -F= '/^CDHash/{print $2}')
 mkdir -p "$HOME/Applications"
 rm -rf "$HOME/Applications/$APP"
 ditto "$APP" "$HOME/Applications/$APP"
@@ -63,11 +65,16 @@ LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchSe
 [ -x "$LSREGISTER" ] && "$LSREGISTER" -f -u "$PWD/$APP" || true
 rm -rf "$APP"
 
-# Ad-hoc re-signing changes the CDHash, which silently invalidates existing
-# TCC grants while System Settings still shows them enabled. Reset our
-# records so the next launch re-prompts cleanly instead of failing silently.
-tccutil reset All com.techjuicelab.aishot >/dev/null 2>&1 || true
-
 echo "installed: $HOME/Applications/$APP"
 echo "launch:    open -gn \"\$HOME/Applications/$APP\""
-echo "note:      permissions were reset — first run will prompt again"
+
+# Ad-hoc re-signing changes the CDHash when the binary changes, which
+# silently invalidates existing TCC grants while System Settings still shows
+# them enabled. Reset our records so the next launch re-prompts cleanly —
+# but only when the code actually changed.
+if [ "$NEW_CDHASH" != "$OLD_CDHASH" ]; then
+  tccutil reset All com.techjuicelab.aishot >/dev/null 2>&1 || true
+  echo "note:      binary changed — permissions were reset, first run will prompt again"
+else
+  echo "note:      binary unchanged — existing permissions kept"
+fi

@@ -23,9 +23,18 @@ the app that was frontmost when you pressed the hotkey:
 | AI apps & browsers — Claude, Codex, ChatGPT, Gemini, Safari, Chrome | the **PNG itself** + auto ⌘V | attaches as an image in the chat input |
 | Anything else | clipboard only, no keystroke | never pastes into the wrong place — hit ⌘V yourself wherever you want |
 
-Screenshots keep your existing archive intact: they are written to the folder
-configured in `com.apple.screencapture location` (falling back to `~/Desktop`)
-with the native macOS naming (`Screenshot 2026-07-08 at 11.09.27 AM.png`).
+Every capture is also **saved as a file** with the native macOS naming
+(`Screenshot 2026-07-08 at 11.09.27 AM.png`), so pasting and archiving happen
+in one motion. The save location is resolved in this order:
+
+1. `--out DIR` flag
+2. the app's own setting — pick a folder with the built-in chooser:
+   ```sh
+   open -na AIShot --args --choose-dir
+   ```
+   (or `defaults write com.techjuicelab.aishot saveDir "~/some/folder"`)
+3. the system screenshot folder (`com.apple.screencapture location`)
+4. `~/Desktop` (the macOS default)
 
 AIShot runs **only while invoked** — it captures, pastes, and exits.
 No menu bar item, no daemon, zero idle footprint.
@@ -86,7 +95,8 @@ open -gn "$HOME/Applications/AIShot.app" --args --mode image
 | Flag | Description | Default |
 |---|---|---|
 | `--mode auto\|path\|image` | force the paste format instead of auto-detecting | `auto` |
-| `--out DIR` | destination folder | `com.apple.screencapture location` |
+| `--out DIR` | destination folder (this run only) | see save-location order above |
+| `--choose-dir` | open a folder picker and save the choice as the app's default | — |
 | `--no-paste` | copy to clipboard only, never synthesize ⌘V | — |
 | `--timeout SEC` | how long the selection UI may wait | `300` |
 | `--self-test` | print folder / frontmost app / permission state and exit | — |

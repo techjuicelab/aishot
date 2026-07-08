@@ -23,9 +23,18 @@
 | AI 앱·브라우저 — Claude, Codex, ChatGPT, Gemini, Safari, Chrome | **PNG 이미지** + 자동 ⌘V | 채팅 입력창에 이미지로 첨부 |
 | 그 외 모든 앱 | 클립보드 복사만 (자동 ⌘V 없음) | 엉뚱한 곳에 붙는 사고 방지 — 원하는 곳에서 직접 ⌘V |
 
-스크린샷은 `com.apple.screencapture location`에 설정된 폴더(없으면 `~/Desktop`)에
-macOS 기본 파일명(`Screenshot 2026-07-08 at 11.09.27 AM.png`)으로 저장되므로
-기존 아카이브가 그대로 유지된다.
+모든 캡처는 macOS 기본 파일명(`Screenshot 2026-07-08 at 11.09.27 AM.png`)의
+**파일로도 저장**되므로 붙여넣기와 아카이빙이 한 동작에 끝난다.
+저장 폴더는 이 순서로 결정된다:
+
+1. `--out DIR` 플래그
+2. 앱 자체 설정 — 내장 폴더 선택창으로 지정:
+   ```sh
+   open -na AIShot --args --choose-dir
+   ```
+   (또는 `defaults write com.techjuicelab.aishot saveDir "~/원하는/폴더"`)
+3. 시스템 스크린샷 폴더 (`com.apple.screencapture location`)
+4. `~/Desktop` (macOS 기본값)
 
 AIShot은 **호출될 때만 실행**된다 — 캡처하고, 붙여넣고, 종료.
 메뉴 막대 아이콘도, 데몬도 없고, 대기 중 점유율은 0이다.
@@ -82,7 +91,8 @@ open -gn "$HOME/Applications/AIShot.app" --args --mode image
 | 플래그 | 설명 | 기본값 |
 |---|---|---|
 | `--mode auto\|path\|image` | 자동 감지 대신 붙여넣기 형식 강제 | `auto` |
-| `--out DIR` | 저장 폴더 | `com.apple.screencapture location` |
+| `--out DIR` | 저장 폴더 (이번 실행만) | 위 저장 폴더 순서 참고 |
+| `--choose-dir` | 폴더 선택창을 열어 앱 기본 저장 폴더로 저장 | — |
 | `--no-paste` | 클립보드 복사까지만, 자동 ⌘V 안 함 | — |
 | `--timeout SEC` | 선택 UI 대기 시간 | `300` |
 | `--self-test` | 폴더·최전면 앱·권한 상태만 출력하고 종료 | — |

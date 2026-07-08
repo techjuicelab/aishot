@@ -74,24 +74,34 @@ var mode = "auto" // auto | path | image
 var paste = true
 var timeout: Double = 300
 var selfTest = false
+var chooseDir = false
 
 var argIt = CommandLine.arguments.dropFirst().makeIterator()
 while let arg = argIt.next() {
     switch arg {
-    case "--out":       outDir = argIt.next()
-    case "--mode":      mode = argIt.next() ?? "auto"
-    case "--no-paste":  paste = false
-    case "--timeout":   timeout = Double(argIt.next() ?? "") ?? 300
-    case "--self-test": selfTest = true
-    default:            fail("unknown flag: \(arg)")
+    case "--out":        outDir = argIt.next()
+    case "--mode":       mode = argIt.next() ?? "auto"
+    case "--no-paste":   paste = false
+    case "--timeout":    timeout = Double(argIt.next() ?? "") ?? 300
+    case "--self-test":  selfTest = true
+    case "--choose-dir": chooseDir = true
+    default:             fail("unknown flag: \(arg)")
     }
 }
 guard ["auto", "path", "image"].contains(mode) else { fail("--mode must be auto|path|image") }
 
 // MARK: - environment
 
+// Save-location priority: --out flag → app setting (saveDir, set with
+// --choose-dir or `defaults write com.techjuicelab.aishot saveDir ...`) →
+// the system screenshot folder (com.apple.screencapture) → ~/Desktop.
 func screenshotFolder() -> String {
     if let d = outDir { return (d as NSString).expandingTildeInPath }
+    if let d = CFPreferencesCopyAppValue("saveDir" as CFString,
+                                         "com.techjuicelab.aishot" as CFString) as? String,
+       !d.isEmpty {
+        return (d as NSString).expandingTildeInPath
+    }
     if let d = CFPreferencesCopyAppValue("location" as CFString,
                                          "com.apple.screencapture" as CFString) as? String,
        !d.isEmpty {
@@ -123,6 +133,31 @@ if selfTest {
     log("screen-record:  \(CGPreflightScreenCaptureAccess() ? "granted" : "NOT granted")")
     log("accessibility:  \(AXIsProcessTrusted() ? "granted" : "NOT granted")")
     log("would paste as: \(m.mode)\(m.autoPaste ? "" : " (clipboard only)")")
+    exit(0)
+}
+
+// Settings: a folder picker that stores the choice in the app's defaults.
+// Run with:  open -na AIShot --args --choose-dir
+if chooseDir {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = false
+    panel.canChooseDirectories = true
+    panel.canCreateDirectories = true
+    panel.prompt = "Use This Folder"
+    panel.message = "AIShot: choose where screenshots are saved"
+    panel.directoryURL = URL(fileURLWithPath: screenshotFolder())
+    panel.level = .modalPanel
+    NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
+    if panel.runModal() == .OK, let url = panel.url {
+        CFPreferencesSetAppValue("saveDir" as CFString, url.path as CFString,
+                                 "com.techjuicelab.aishot" as CFString)
+        CFPreferencesAppSynchronize("com.techjuicelab.aishot" as CFString)
+        log("save folder set: \(url.path)")
+    } else {
+        log("save folder unchanged: \(screenshotFolder())")
+    }
     exit(0)
 }
 
