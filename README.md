@@ -25,16 +25,22 @@ the app that was frontmost when you pressed the hotkey:
 
 Every capture is also **saved as a file** with the native macOS naming
 (`Screenshot 2026-07-08 at 11.09.27 AM.png`), so pasting and archiving happen
-in one motion. The save location is resolved in this order:
+in one motion.
 
-1. `--out DIR` flag
-2. the app's own setting — pick a folder with the built-in chooser:
-   ```sh
-   open -na AIShot --args --choose-dir
-   ```
-   (or `defaults write com.techjuicelab.aishot saveDir "~/some/folder"`)
-3. the system screenshot folder (`com.apple.screencapture location`)
-4. `~/Desktop` (the macOS default)
+**No setup needed**: AIShot saves to the same folder macOS uses for
+⌘⇧3/4/5 screenshots. If you've moved that folder (System Settings /
+`defaults write com.apple.screencapture location`), AIShot follows
+automatically. You only ever configure something if you want AIShot captures
+in a *different* folder than regular screenshots — run the built-in folder
+chooser once:
+
+```sh
+open -na AIShot --args --choose-dir
+```
+
+Full resolution order: `--out DIR` flag → the app's own folder (set by
+`--choose-dir`, or `defaults write com.techjuicelab.aishot saveDir ...`) →
+the system screenshot folder → `~/Desktop` (the macOS stock default).
 
 AIShot runs **only while invoked** — it captures, pastes, and exits.
 No menu bar item, no daemon, zero idle footprint.

@@ -25,16 +25,20 @@
 
 모든 캡처는 macOS 기본 파일명(`Screenshot 2026-07-08 at 11.09.27 AM.png`)의
 **파일로도 저장**되므로 붙여넣기와 아카이빙이 한 동작에 끝난다.
-저장 폴더는 이 순서로 결정된다:
 
-1. `--out DIR` 플래그
-2. 앱 자체 설정 — 내장 폴더 선택창으로 지정:
-   ```sh
-   open -na AIShot --args --choose-dir
-   ```
-   (또는 `defaults write com.techjuicelab.aishot saveDir "~/원하는/폴더"`)
-3. 시스템 스크린샷 폴더 (`com.apple.screencapture location`)
-4. `~/Desktop` (macOS 기본값)
+**설정 필요 없음**: AIShot은 macOS가 ⌘⇧3/4/5 스크린샷을 저장하는 폴더에
+그대로 저장한다. 스크린샷 폴더를 옮겨놨다면(시스템 설정 /
+`defaults write com.apple.screencapture location`) 자동으로 따라간다.
+일반 스크린샷과 **다른** 폴더에 AIShot 캡처만 모으고 싶을 때만 내장 폴더
+선택창을 한 번 실행하면 된다:
+
+```sh
+open -na AIShot --args --choose-dir
+```
+
+전체 우선순위: `--out DIR` 플래그 → 앱 자체 폴더(`--choose-dir` 또는
+`defaults write com.techjuicelab.aishot saveDir ...`) → 시스템 스크린샷 폴더
+→ `~/Desktop`(macOS 순정 기본값).
 
 AIShot은 **호출될 때만 실행**된다 — 캡처하고, 붙여넣고, 종료.
 메뉴 막대 아이콘도, 데몬도 없고, 대기 중 점유율은 0이다.
