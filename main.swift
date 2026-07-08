@@ -149,7 +149,7 @@ if chooseDir {
     panel.message = "AIShot: choose where screenshots are saved"
     panel.directoryURL = URL(fileURLWithPath: screenshotFolder())
     panel.level = .modalPanel
-    NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
+    app.activate()
     if panel.runModal() == .OK, let url = panel.url {
         CFPreferencesSetAppValue("saveDir" as CFString, url.path as CFString,
                                  "com.techjuicelab.aishot" as CFString)

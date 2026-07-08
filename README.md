@@ -47,17 +47,27 @@ No menu bar item, no daemon, zero idle footprint.
 
 ## Install
 
-**Build from source** (requires Xcode Command Line Tools):
+Requires macOS 14 or later (Apple Silicon or Intel).
+
+**Build from source** (requires Xcode Command Line Tools) — recommended,
+no Gatekeeper friction:
 
 ```sh
 git clone https://github.com/techjuicelab/aishot.git
 cd aishot && ./build.sh   # builds, signs (ad-hoc), installs to ~/Applications
 ```
 
-Or download `AIShot.app.zip` from
-[Releases](https://github.com/techjuicelab/aishot/releases), unzip into
-`~/Applications`. Browser downloads are quarantined, so right-click → Open
-once on first launch.
+**Or download** `AIShot.app.zip` from
+[Releases](https://github.com/techjuicelab/aishot/releases) and unzip into
+`~/Applications`. The app is not notarized, so macOS quarantines the
+download — clear it with
+
+```sh
+xattr -dr com.apple.quarantine ~/Applications/AIShot.app
+```
+
+or launch it once and approve it under System Settings → Privacy & Security
+→ "Open Anyway" (on macOS 15+ right-click → Open no longer bypasses this).
 
 ## Hotkey
 
@@ -67,10 +77,16 @@ Bind any launcher you already use to:
 open -gn "$HOME/Applications/AIShot.app"
 ```
 
-- **Karabiner-Elements**: copy [`karabiner/aishot.json`](karabiner/aishot.json)
-  into `~/.config/karabiner/assets/complex_modifications/`, then enable the
-  "AIShot" rule in Karabiner-Elements → Complex Modifications → Add rule.
-  Ships as <kbd>⌘⇧2</kbd> — right next to the system's ⌘⇧3/4/5 screenshot family.
+- **Karabiner-Elements**:
+
+  ```sh
+  mkdir -p ~/.config/karabiner/assets/complex_modifications
+  cp karabiner/aishot.json ~/.config/karabiner/assets/complex_modifications/
+  ```
+
+  then enable the "AIShot" rule in Karabiner-Elements → Complex
+  Modifications → Add predefined rule. Ships as <kbd>⌘⇧2</kbd> — right next
+  to the system's ⌘⇧3/4/5 screenshot family.
 - **Alfred / Raycast / Shortcuts.app**: point a hotkey at the same `open` command.
 
 ## First-run permissions (one-time)
