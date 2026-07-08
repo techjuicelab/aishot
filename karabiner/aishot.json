@@ -1,0 +1,18 @@
+{
+    "title": "AIShot",
+    "rules": [
+        {
+            "description": "AI Screenshot: cmd+shift+2 launches AIShot (capture, then paste into frontmost AI app)",
+            "manipulators": [
+                {
+                    "type": "basic",
+                    "from": {
+                        "key_code": "2",
+                        "modifiers": { "mandatory": ["command", "shift"] }
+                    },
+                    "to": [{ "shell_command": "open -gn \"$HOME/Applications/AIShot.app\"" }]
+                }
+            ]
+        }
+    ]
+}
