@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIShot — one hotkey, straight to what you're typing</title>
+<meta name="description" content="A free, open-source macOS app that takes a screenshot and hands it to the app in front of you — a file path for terminals, the image for AI apps, clipboard for the rest. One hotkey, auto-paste, no Finder digging.">
+<meta name="theme-color" content="#0d0f12">
+<meta name="application-name" content="AIShot">
+<meta name="apple-mobile-web-app-title" content="AIShot">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="msapplication-TileColor" content="#0d0f12">
+<meta name="msapplication-TileImage" content="/mstile-150x150.png">
+<link rel="canonical" href="https://aishot.techjuicelab.site">
+<meta property="og:title" content="AIShot — one hotkey, straight to what you're typing">
+<meta property="og:description" content="Take a screenshot and hand it to the app you're already talking to — a file path for terminals, the image for AI apps, clipboard for the rest. Free and open source.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://aishot.techjuicelab.site">
+<meta property="og:image" content="/icon.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1024">
+<meta property="og:image:height" content="1024">
+<meta property="og:image:alt" content="AIShot app icon">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="/icon.png">
+<meta name="twitter:image:alt" content="AIShot app icon">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="shortcut icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<style>
+  :root{
+    --page:#0d0f12;
+    --win:#15171c;
+    --bar:#23262c;
+    --tl-r:#ff5f57; --tl-y:#febc2e; --tl-g:#28c840;
+    --text:#e6e8ec;
+    --dim:#6b7280;
+    --amber:#e8a44c;
+    --amber-deep:#c9853a;
+    --sel:rgba(232,164,76,.18);
+    --line:rgba(230,232,236,.08);
+    --line-2:rgba(230,232,236,.14);
+    --mono:ui-monospace,"SFMono-Regular",Menlo,"Cascadia Mono","Roboto Mono",monospace;
+    --sans:system-ui,-apple-system,"Inter","Segoe UI",Roboto,sans-serif;
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:var(--page);
+    color:var(--text);
+    font-family:var(--mono);
+    font-size:15px;
+    line-height:1.55;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(1200px 520px at 50% -240px, rgba(232,164,76,.10), transparent 70%),
+      radial-gradient(700px 700px at 88% 8%, rgba(232,164,76,.04), transparent 70%);
+  }
+
+  ::selection{background:var(--sel);color:#fff}
+  a{color:inherit;text-decoration:none}
+
+  :focus-visible{
+    outline:2px solid var(--amber);
+    outline-offset:3px;
+    border-radius:3px;
+  }
+
+  .wrap{width:100%;max-width:960px;margin:0 auto;padding:0 20px}
+
+  /* ---------- nav ---------- */
+  nav{
+    position:sticky;top:0;z-index:20;
+    background:rgba(13,15,18,.72);
+    backdrop-filter:saturate(140%) blur(10px);
+    -webkit-backdrop-filter:saturate(140%) blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav-in{display:flex;align-items:center;gap:12px;height:60px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:600;min-width:0}
+  .brand img{
+    width:26px;height:26px;border-radius:6px;display:block;
+    box-shadow:0 0 0 1px var(--line-2), 0 2px 10px rgba(0,0,0,.5);
+  }
+  .brand b{font-family:var(--sans);font-weight:650;letter-spacing:-.01em;font-size:16px}
+  .brand span{color:var(--amber)}
+  .nav-spacer{flex:1}
+  .ghost-meta{color:var(--dim);font-size:12.5px;letter-spacing:.02em;display:none}
+  @media(min-width:640px){ .ghost-meta{display:inline} }
+
+  .cta,.nav-btn{
+    display:inline-flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:13px;
+    padding:8px 13px;
+    border:1px solid var(--line-2);
+    border-radius:8px;
+    background:linear-gradient(180deg,#20232a,#181b20);
+    color:var(--text);cursor:pointer;
+    transition:border-color .15s ease, transform .12s ease, background .15s ease;
+  }
+  .cta:hover,.nav-btn:hover{border-color:var(--amber-deep);transform:translateY(-1px)}
+  .cta .arw{color:var(--amber)}
+
+  /* ---------- hero ---------- */
+  header{padding:52px 0 40px}
+  .eyebrow{
+    color:var(--amber);
+    font-size:12px;
+    letter-spacing:.34em;
+    text-transform:uppercase;
+    margin:0 0 18px;
+    display:flex;align-items:center;gap:12px;
+  }
+  .eyebrow::after{content:"";height:1px;flex:1;background:linear-gradient(90deg,var(--amber-deep),transparent)}
+
+  .term{
+    border-radius:12px;
+    background:var(--win);
+    border:1px solid var(--line-2);
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,.4),
+      0 30px 70px -30px rgba(0,0,0,.85),
+      0 0 90px -30px rgba(232,164,76,.22);
+    overflow:hidden;
+  }
+  .titlebar{
+    display:flex;align-items:center;
+    height:38px;padding:0 14px;
+    background:linear-gradient(180deg,#282b32,var(--bar));
+    border-bottom:1px solid rgba(0,0,0,.5);
+    position:relative;
+  }
+  .lights{display:flex;gap:8px}
+  .lights i{width:12px;height:12px;border-radius:50%;display:block;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.25)}
+  .lights .r{background:var(--tl-r)} .lights .y{background:var(--tl-y)} .lights .g{background:var(--tl-g)}
+  .term-title{
+    position:absolute;left:0;right:0;text-align:center;
+    font-size:12.5px;color:#aeb2ba;pointer-events:none;letter-spacing:.01em;
+  }
+  .term-title b{color:#cfd3da;font-weight:600}
+
+  .screen{
+    padding:26px 22px 30px;
+    background:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px),
+      radial-gradient(120% 100% at 50% -10%, rgba(232,164,76,.05), transparent 60%);
+  }
+  @media(min-width:640px){ .screen{padding:34px 34px 40px} }
+
+  .cmd{color:var(--dim);font-size:14px;margin:0 0 4px;white-space:nowrap;overflow-x:auto}
+  .cmd .pmt{color:var(--amber)}
+  .cmd .path{color:#9aa0aa}
+  .cmd .flag{color:var(--text)}
+
+  .out{margin:14px 0 0}
+  .headline{
+    margin:0;
+    font-family:var(--mono);
+    font-weight:600;
+    font-size:clamp(23px,5.4vw,42px);
+    line-height:1.12;
+    letter-spacing:-.015em;
+    color:var(--amber);
+    text-shadow:0 0 22px rgba(232,164,76,.35);
+  }
+  .headline .plain{color:var(--text);text-shadow:none}
+
+  .caret{
+    display:inline-block;width:.62ch;height:1.02em;
+    margin-left:2px;vertical-align:-.14em;
+    background:var(--amber);
+    box-shadow:0 0 10px rgba(232,164,76,.6);
+    animation:blink 1.05s steps(1) infinite;
+  }
+  @keyframes blink{50%{opacity:0}}
+
+  .sub{margin:22px 0 0;color:#c3c7cf;font-size:14.5px;max-width:60ch;line-height:1.6}
+  .sub .c{color:var(--dim)}
+
+  .facts{list-style:none;margin:22px 0 0;padding:0;display:grid;gap:7px;font-size:13.5px;color:#c3c7cf}
+  .facts li{display:flex;gap:12px;align-items:baseline}
+  .facts .k{color:var(--amber);min-width:15ch;flex:0 0 auto;letter-spacing:.02em}
+  @media(max-width:460px){ .facts li{flex-direction:column;gap:1px} .facts .k{min-width:0} }
+
+  .actions{display:flex;flex-wrap:wrap;gap:12px;margin:28px 0 0}
+  .btn{
+    display:inline-flex;align-items:center;gap:9px;
+    font-family:var(--mono);font-size:14px;
+    padding:11px 18px;border-radius:9px;
+    border:1px solid transparent;
+    transition:transform .12s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease;
+  }
+  .btn-primary{
+    background:linear-gradient(180deg,var(--amber),var(--amber-deep));
+    color:#1a1206;font-weight:650;
+    box-shadow:0 8px 26px -12px rgba(232,164,76,.8);
+  }
+  .btn-primary:hover{transform:translateY(-1px);box-shadow:0 12px 30px -12px rgba(232,164,76,.95)}
+  .btn-ghost{border-color:var(--line-2);color:var(--text)}
+  .btn-ghost:hover{border-color:var(--amber-deep);background:rgba(232,164,76,.06)}
+  .btn small{color:inherit;opacity:.62;font-weight:400}
+
+  /* selection marquee motif */
+  .marquee-wrap{margin:40px 0 0;display:flex;justify-content:center}
+  .marquee{
+    position:relative;color:var(--dim);font-size:12px;line-height:1.35;
+    padding:16px 20px;border:1px dashed rgba(232,164,76,.35);
+    border-radius:4px;letter-spacing:.02em;max-width:100%;
+  }
+  .marquee b{color:var(--amber);font-weight:600}
+  .marquee::before,.marquee::after{content:"";position:absolute;width:12px;height:12px;border:2px solid var(--amber)}
+  .marquee::before{top:-2px;left:-2px;border-right:0;border-bottom:0}
+  .marquee::after{bottom:-2px;right:-2px;border-left:0;border-top:0}
+  .marquee .tag{position:absolute;top:-9px;left:16px;background:var(--page);padding:0 8px;color:var(--amber);font-size:11px;letter-spacing:.06em}
+  .marquee .dim{color:#7d828c}
+
+  /* ---------- generic section ---------- */
+  section{border-top:1px solid var(--line);padding:54px 0}
+  .kicker{
+    display:flex;align-items:center;gap:10px;
+    color:var(--amber);font-size:12px;letter-spacing:.24em;text-transform:uppercase;
+    margin:0 0 16px;
+  }
+  .kicker::before{content:"$";color:var(--amber-deep);font-weight:700}
+  h2{
+    margin:0;font-family:var(--mono);font-weight:600;
+    font-size:clamp(20px,3.6vw,29px);line-height:1.2;letter-spacing:-.01em;color:var(--text);
+  }
+  .lead{margin:14px 0 0;color:#c3c7cf;font-size:14.5px;max-width:66ch;line-height:1.62}
+  .lead .em{color:var(--text)}
+
+  /* ---------- man page (how it works) ---------- */
+  .man{border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#131519,#101215);overflow:hidden;margin-top:26px}
+  .man-head{
+    display:flex;justify-content:space-between;align-items:center;gap:12px;
+    padding:11px 18px;color:var(--dim);font-size:12px;letter-spacing:.06em;
+    border-bottom:1px solid var(--line);background:rgba(255,255,255,.015);
+  }
+  .man-head b{color:#aeb2ba;font-weight:600}
+  .man-body{padding:22px 18px 26px}
+  @media(min-width:640px){ .man-body{padding:28px 30px 32px} }
+  .man h3{margin:0;color:var(--amber);font-size:12px;letter-spacing:.24em;text-transform:uppercase;font-weight:600}
+  .man .desc{margin:10px 0 0;color:#c3c7cf;font-size:14px;max-width:64ch}
+  .synopsis{
+    margin:24px 0 0;padding:14px 16px;border-radius:8px;
+    background:#0b0d10;border:1px solid var(--line);
+    color:#c3c7cf;font-size:13.5px;overflow-x:auto;white-space:nowrap;
+  }
+  .synopsis .key{color:var(--amber);border:1px solid rgba(232,164,76,.4);border-radius:5px;padding:1px 7px;font-size:12.5px}
+  .synopsis .arw{color:var(--dim);padding:0 8px}
+  .routes{margin:24px 0 0;display:grid;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .route{display:grid;grid-template-columns:1fr;gap:4px;padding:16px 18px;background:#101216}
+  @media(min-width:600px){ .route{grid-template-columns:16ch 1fr auto;gap:16px;align-items:baseline} }
+  .route .when{color:var(--amber);font-size:13.5px;letter-spacing:.01em}
+  .route .does{color:#c3c7cf;font-size:13.5px}
+  .route .out-ex{color:var(--dim);font-size:12.5px;white-space:nowrap;overflow-x:auto}
+  .route .out-ex .png{color:var(--amber-deep)}
+  .saved-note{margin:18px 0 0;color:var(--dim);font-size:13px;padding-left:2px}
+  .saved-note .png{color:var(--amber)}
+  .saved-note .dim{color:#565b64}
+  .man-foot{margin:24px 0 0;color:var(--dim);font-size:12.5px;display:flex;flex-wrap:wrap;gap:6px 18px}
+  .man-foot span{white-space:normal}
+  .man-foot b{color:#aeb2ba;font-weight:600}
+
+  /* ---------- features grid ---------- */
+  .grid{margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:560px){ .grid{grid-template-columns:1fr} }
+  .feat{border:1px solid var(--line);background:#101216;border-radius:10px;padding:16px 18px}
+  .feat h3{margin:0;font-size:14px;font-weight:600;color:var(--text);display:flex;gap:8px;align-items:baseline}
+  .feat h3::before{content:"\203A";color:var(--amber);font-weight:700}
+  .feat p{margin:7px 0 0;font-size:13px;color:var(--dim);line-height:1.55}
+
+  /* ---------- honest ---------- */
+  .honest{margin-top:24px;border:1px solid var(--line);border-left:3px solid var(--amber);background:#101216;border-radius:0 10px 10px 0;padding:18px 20px}
+  .honest ul{margin:0;padding-left:20px;color:#c3c7cf;font-size:13.5px;line-height:1.6}
+  .honest li{margin:8px 0}
+
+  /* ---------- install code ---------- */
+  .code{
+    margin-top:24px;background:#0b0d10;border:1px solid var(--line);border-radius:10px;
+    padding:18px 20px;font-family:var(--mono);font-size:13px;color:#d6d6e6;
+    overflow-x:auto;line-height:1.9;white-space:pre;
+  }
+  .code .c{color:var(--dim)}
+  .code .pmt{color:var(--amber)}
+  .req{margin:16px 0 0;color:#c3c7cf;font-size:13.5px;max-width:66ch;line-height:1.6}
+  .req code,.req kbd{color:var(--amber)}
+  .req kbd{border:1px solid rgba(232,164,76,.4);border-radius:5px;padding:0 6px;font-size:12px}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--line);padding:30px 0 46px;color:var(--dim);font-size:12.5px}
+  .foot-lab{color:#aeb2ba;font-weight:600;font-size:13px}
+  .foot-p{margin:10px 0 0;color:var(--dim);font-size:12.5px;max-width:60ch;line-height:1.6}
+  .foot-links{margin:18px 0 0;display:flex;flex-wrap:wrap;gap:8px 18px}
+  .foot-links a:hover{color:var(--amber)}
+
+  /* ---------- reveal ---------- */
+  .reveal{opacity:0;transform:translateY(12px);transition:opacity .6s ease,transform .6s ease}
+  .reveal.in{opacity:1;transform:none}
+
+  @media(prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    html{scroll-behavior:auto}
+    .caret{display:none}
+    .reveal{opacity:1;transform:none}
+    [data-reveal]{opacity:1!important;transform:none!important}
+  }
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="AIShot home">
+      <img src="icon.png" width="26" height="26" alt="">
+      <b>AI<span>Shot</span></b>
+    </a>
+    <div class="nav-spacer"></div>
+    <span class="ghost-meta" data-i18n="ghostMeta">macOS 14+ · MIT</span>
+    <button class="nav-btn" id="langBtn" onclick="toggleLang()">한국어</button>
+    <a class="cta" href="https://github.com/techjuicelab/aishot" target="_blank" rel="noopener">GitHub <span class="arw">↗</span></a>
+  </div>
+</nav>
+
+<main id="top">
+  <header class="wrap">
+    <p class="eyebrow" data-i18n="eyebrow">aishot · macOS capture</p>
+
+    <div class="term" role="img" aria-label="Terminal window titled aishot — zsh, showing the AIShot headline as command output.">
+      <div class="titlebar">
+        <div class="lights" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+        <div class="term-title"><b>aishot</b> — zsh — 92×24</div>
+      </div>
+      <div class="screen">
+        <p class="cmd"><span class="pmt">~</span> <span class="path">$</span> <span class="flag" data-type>aishot --send</span></p>
+
+        <div class="out">
+          <h1 class="headline"><span data-type-head data-i18n="h1">Take the shot. It lands where you're already typing.</span><span class="caret" aria-hidden="true"></span></h1>
+        </div>
+
+        <p class="sub" data-reveal data-i18n="sub">One hotkey. AIShot grabs a screenshot and reads the app in front of you, then hands over whatever that app actually wants — no dragging, no "where did it save," no detour through Finder. <span class="c"># and it saves a real PNG every time, so you keep the file too.</span></p>
+
+        <ul class="facts" data-reveal>
+          <li data-i18n="fact1"><span class="k">$ frontmost</span><span>a terminal or IDE gets an escaped file path — exactly what a CLI agent needs.</span></li>
+          <li data-i18n="fact2"><span class="k">$ frontmost</span><span>an AI app or browser gets the PNG pasted straight in.</span></li>
+          <li data-i18n="fact3"><span class="k">$ idle</span><span>nothing runs in the background. It wakes only on the hotkey.</span></li>
+        </ul>
+
+        <div class="actions" data-reveal>
+          <a class="btn btn-primary" href="https://github.com/techjuicelab/aishot" target="_blank" rel="noopener" data-i18n="ctaPrimary">Get it on GitHub</a>
+          <a class="btn btn-ghost" href="#how" data-i18n="ctaGhost">See where it pastes ↓</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="marquee-wrap" data-reveal>
+      <div class="marquee">
+        <span class="tag" data-i18n="marqueeTag">selection</span>
+        <span data-i18n="marqueeText"><b>hotkey</b> → drag a region → release. <span class="dim">Space = window · Esc = cancel · in your clipboard before you blink.</span></span>
+      </div>
+    </div>
+  </header>
+
+  <section class="reveal"><div class="wrap">
+    <p class="kicker" data-i18n="s1k">the real friction</p>
+    <h2 data-i18n="s1h">The screenshot was never the hard part.</h2>
+    <p class="lead" data-i18n="s1p">To show an AI what's on your screen you capture it — then hunt through Finder for the file, or drag it into the chat window. Every single time. <span class="em">The friction isn't the shot. It's the shuffle afterward.</span></p>
+  </div></section>
+
+  <section class="reveal"><div class="wrap">
+    <p class="kicker" data-i18n="s2k">one hotkey, done</p>
+    <h2 data-i18n="s2h">Capture, and it's already in the conversation.</h2>
+    <p class="lead" data-i18n="s2p">Press your hotkey, drag a region — <span class="em">Space</span> grabs a whole window, <span class="em">Esc</span> cancels. The PNG saves to your normal screenshot folder <span class="em">and</span> lands in whatever app was frontmost, pasted for you with an automatic ⌘V. No Finder, no drag &amp; drop.</p>
+  </div></section>
+
+  <section class="reveal" id="how"><div class="wrap">
+    <p class="kicker" data-i18n="s3k">how it works</p>
+    <h2 data-i18n="s3h">It pastes the right thing for where you are.</h2>
+
+    <div class="man">
+      <div class="man-head"><span>AISHOT(1)</span><b>User Commands</b><span>AISHOT(1)</span></div>
+      <div class="man-body">
+        <h3 data-i18n="manNameLbl">Name</h3>
+        <p class="desc" data-i18n="howName">aishot — capture once, then hand the shot to whatever app is in front. The paste changes to fit; the saved file never does.</p>
+
+        <div class="synopsis" aria-label="synopsis" data-i18n="synopsis"><span class="key">hotkey</span><span class="arw">→</span>[ select region ]<span class="arw">→</span>read frontmost app<span class="arw">→</span>paste the right thing</div>
+
+        <div class="routes" role="table" aria-label="Where AIShot pastes, by app">
+          <div class="route" role="row" data-i18n="route1">
+            <span class="when" role="cell">terminal · IDE</span>
+            <span class="does" role="cell">pastes an escaped file path — what Claude Code and other CLI agents read.</span>
+            <span class="out-ex" role="cell">escaped path <span class="png">+ ⌘V</span></span>
+          </div>
+          <div class="route" role="row" data-i18n="route2">
+            <span class="when" role="cell">AI app · browser</span>
+            <span class="does" role="cell">pastes the PNG itself, dropped into the message box.</span>
+            <span class="out-ex" role="cell">PNG image <span class="png">+ ⌘V</span></span>
+          </div>
+          <div class="route" role="row" data-i18n="route3">
+            <span class="when" role="cell">anything else</span>
+            <span class="does" role="cell">copies to the clipboard and saves the file, ready when you are.</span>
+            <span class="out-ex" role="cell">clipboard only</span>
+          </div>
+        </div>
+
+        <p class="saved-note" data-i18n="savedNote">And always — <span class="png">saved as a real file</span> <span class="dim">· Screenshot 2026-07-08 at 11.09.27 AM.png</span></p>
+
+        <div class="man-foot">
+          <span data-i18n="foot1"><b>REQUIRES</b> macOS 14 Sonoma+</span>
+          <span data-i18n="foot2"><b>LICENSE</b> MIT</span>
+          <span data-i18n="foot3"><b>FOOTPRINT</b> 0 background processes</span>
+          <span data-i18n="foot4"><b>SAVES</b> your system screenshot folder</span>
+        </div>
+      </div>
+    </div>
+  </div></section>
+
+  <section class="reveal"><div class="wrap">
+    <p class="kicker" data-i18n="s4k">what it does</p>
+    <h2 data-i18n="s4h">Small on the surface, precise underneath.</h2>
+    <p class="lead" data-i18n="s4p">Region or window, path or image, saved and pasted — every part is tuned to disappear into the one motion of showing the AI what you see.</p>
+    <div class="grid">
+      <div class="feat"><h3 data-i18n="f1t">Region or window</h3><p data-i18n="f1p">Drag any region, or hit Space to grab a whole window.</p></div>
+      <div class="feat"><h3 data-i18n="f2t">Format auto-detect</h3><p data-i18n="f2p">Path for terminals, image for chats — decided per app.</p></div>
+      <div class="feat"><h3 data-i18n="f3t">Automatic ⌘V</h3><p data-i18n="f3p">It pastes for you, so the shot lands right where your cursor is.</p></div>
+      <div class="feat"><h3 data-i18n="f4t">Saved as a file</h3><p data-i18n="f4p">Native macOS naming, archived the moment it's captured.</p></div>
+      <div class="feat"><h3 data-i18n="f5t">Zero setup</h3><p data-i18n="f5p">Follows your system screenshot folder, even if you moved it.</p></div>
+      <div class="feat"><h3 data-i18n="f6t">No idle footprint</h3><p data-i18n="f6p">Runs only when invoked. No menu bar item, no daemon.</p></div>
+    </div>
+  </div></section>
+
+  <section class="reveal"><div class="wrap">
+    <p class="kicker" data-i18n="s5k">open &amp; honest</p>
+    <h2 data-i18n="s5h">Honest tools age better than magic ones.</h2>
+    <p class="lead" data-i18n="s5p">MIT-licensed, with the full source on GitHub. And the rough edges, up front:</p>
+    <div class="honest"><ul data-i18n="s5list">
+      <li>Ad-hoc signed, not notarized — first launch needs a one-time "Open Anyway" under Privacy &amp; Security.</li>
+      <li>Two one-time permissions: Screen Recording, then Accessibility for the synthesized ⌘V. Until Accessibility is granted it still copies to the clipboard.</li>
+      <li>Rebuilding from source resets its permission grants by design, so the next launch re-prompts cleanly.</li>
+      <li>No account, no telemetry, no upsell.</li>
+    </ul></div>
+  </div></section>
+
+  <section class="reveal" id="install"><div class="wrap">
+    <p class="kicker" data-i18n="s6k">run it yourself</p>
+    <h2 data-i18n="s6h">Clone, build, bind a hotkey.</h2>
+    <p class="req" data-i18n="s6p">You'll need macOS 14+ and Xcode Command Line Tools. <code>build.sh</code> builds, ad-hoc signs, and installs to <code>~/Applications</code>. Then point any launcher — Karabiner ships <kbd>⌘⇧2</kbd> — at the open command.</p>
+    <div class="code"><span class="c" data-i18n="codeComment"># get the code and build</span>
+<span class="pmt">$</span> git clone https://github.com/techjuicelab/aishot.git
+<span class="pmt">$</span> cd aishot &amp;&amp; ./build.sh
+
+<span class="c" data-i18n="codeComment2"># bind a hotkey to this launch command</span>
+<span class="pmt">$</span> open -gn "$HOME/Applications/AIShot.app"</div>
+    <div class="actions">
+      <a class="btn btn-primary" href="https://github.com/techjuicelab/aishot" target="_blank" rel="noopener" data-i18n="ctaPrimary2">Get it on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/techjuicelab/aishot/releases" target="_blank" rel="noopener" data-i18n="ctaReleases">Releases ↗</a>
+    </div>
+  </div></section>
+</main>
+
+<footer class="wrap">
+  <div class="foot-lab" data-i18n="footLab">From the TechJuiceLab</div>
+  <p class="foot-p" data-i18n="footP">AIShot is one of the small, sharp tools I build — things that fix one real annoyance properly and stay out of the way. Free, open, and made because I wanted it on my own Mac.</p>
+  <div class="foot-links">
+    <a href="https://github.com/techjuicelab/aishot" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/techjuicelab/aishot/releases" target="_blank" rel="noopener" data-i18n="lkRel">Releases</a>
+    <a href="https://github.com/techjuicelab/aishot#readme" target="_blank" rel="noopener" data-i18n="lkDoc">Docs</a>
+    <a href="https://github.com/techjuicelab/aishot/issues" target="_blank" rel="noopener" data-i18n="lkIssues">Issues</a>
+  </div>
+</footer>
+
+<script>
+  const KO = {
+    ghostMeta:"macOS 14+ · MIT",
+    eyebrow:"aishot · macOS 캡처",
+    h1:"찍기만 하세요. 지금 타이핑하던 그 자리에 그대로 꽂힙니다.",
+    sub:'단축키 하나. AIShot이 스크린샷을 찍고 눈앞의 앱을 읽은 뒤, 그 앱이 실제로 원하는 형식으로 건네줍니다 — 드래그도, "어디 저장됐지"도, Finder를 거칠 일도 없이. <span class="c"># 게다가 매번 진짜 PNG로 저장돼, 파일도 그대로 남습니다.</span>',
+    fact1:'<span class="k">$ frontmost</span><span>터미널·IDE엔 이스케이프된 파일 경로 — CLI 에이전트가 딱 원하는 형식.</span>',
+    fact2:'<span class="k">$ frontmost</span><span>AI 앱·브라우저엔 PNG 이미지를 바로 붙여넣기.</span>',
+    fact3:'<span class="k">$ idle</span><span>백그라운드에 아무것도 없음. 단축키를 눌러야만 깨어납니다.</span>',
+    ctaPrimary:"GitHub에서 받기", ctaPrimary2:"GitHub에서 받기", ctaGhost:"어디에 붙는지 보기 ↓",
+    ctaReleases:"릴리스 ↗",
+    marqueeTag:"영역 선택",
+    marqueeText:'<b>단축키</b> → 영역 드래그 → 놓기. <span class="dim">Space = 창 · Esc = 취소 · 눈 깜짝할 새 클립보드로.</span>',
+    s1k:"진짜 번거로움", s1h:"번거로운 건 스크린샷이 아니었어요.",
+    s1p:'화면을 AI에게 보여주려면 캡처를 하고 — 그다음 Finder에서 파일을 찾거나 채팅 창으로 끌어다 놓죠. 매번요. <span class="em">힘든 건 찍는 게 아니라, 찍고 난 뒤의 그 왔다 갔다입니다.</span>',
+    s2k:"단축키 한 번이면", s2h:"찍는 순간, 이미 대화 안에 들어가 있습니다.",
+    s2p:'단축키를 누르고 영역을 드래그하세요 — <span class="em">Space</span>로 창 전체, <span class="em">Esc</span>로 취소. PNG는 평소 스크린샷 폴더에 저장되는 <span class="em">동시에</span>, 방금까지 최전면에 있던 앱으로 들어가 자동 ⌘V까지 됩니다. Finder도, 드래그&드롭도 필요 없어요.',
+    s3k:"동작 원리", s3h:"지금 있는 곳에 맞는 걸 붙여넣습니다.",
+    manNameLbl:"이름",
+    howName:"aishot — 한 번 캡처하면, 최전면에 있는 앱이 무엇이든 그 앱에 건네줍니다. 붙여넣는 형식은 상황에 맞게 바뀌지만, 저장되는 파일은 언제나 그대로입니다.",
+    synopsis:'<span class="key">단축키</span><span class="arw">→</span>[ 영역 선택 ]<span class="arw">→</span>최전면 앱 확인<span class="arw">→</span>맞는 걸 붙여넣기',
+    route1:'<span class="when">터미널 · IDE</span><span class="does">이스케이프된 파일 경로를 붙여넣기 — Claude Code 등 CLI 에이전트가 읽는 형식.</span><span class="out-ex">이스케이프 경로 <span class="png">+ ⌘V</span></span>',
+    route2:'<span class="when">AI 앱 · 브라우저</span><span class="does">PNG 이미지 그대로, 메시지 입력창에 붙여넣기.</span><span class="out-ex">PNG 이미지 <span class="png">+ ⌘V</span></span>',
+    route3:'<span class="when">그 외 모든 앱</span><span class="does">클립보드에 복사하고 파일로 저장 — 원할 때 쓰세요.</span><span class="out-ex">클립보드 복사만</span>',
+    savedNote:'그리고 언제나 — <span class="png">진짜 파일로도 저장</span> <span class="dim">· Screenshot 2026-07-08 at 11.09.27 AM.png</span>',
+    foot1:'<b>필요</b> macOS 14 Sonoma+', foot2:'<b>라이선스</b> MIT',
+    foot3:'<b>점유율</b> 백그라운드 프로세스 0', foot4:'<b>저장</b> 시스템 스크린샷 폴더',
+    s4k:"하는 일", s4h:"겉은 단순하게, 속은 촘촘하게.",
+    s4p:"영역이냐 창이냐, 경로냐 이미지냐, 저장하고 붙여넣기까지 — 모든 조각이 '본 것을 AI에게 보여준다'는 한 동작 속으로 사라지도록 다듬었습니다.",
+    f1t:"영역 또는 창", f1p:"원하는 영역을 드래그하거나, Space로 창 전체를 잡으세요.",
+    f2t:"형식 자동 감지", f2p:"터미널엔 경로, 채팅엔 이미지 — 앱마다 알아서 판단.",
+    f3t:"자동 ⌘V", f3p:"대신 붙여넣어 주니, 커서가 있는 그 자리에 바로 꽂힙니다.",
+    f4t:"파일로도 저장", f4p:"macOS 기본 파일명으로, 찍는 순간 함께 보관.",
+    f5t:"설정 필요 없음", f5p:"시스템 스크린샷 폴더를 그대로 따라갑니다. 옮겨놔도요.",
+    f6t:"대기 점유율 0", f6p:"호출될 때만 실행. 메뉴 막대 아이콘도, 데몬도 없습니다.",
+    s5k:"솔직하게", s5h:"솔직한 도구가 더 오래갑니다.",
+    s5p:"MIT 라이선스에 전체 소스가 GitHub에 공개돼 있습니다. 아쉬운 점도 먼저 말씀드릴게요:",
+    s5list:'<li>공증이 아닌 애드혹 서명이라, 첫 실행 때 개인정보 보호 및 보안에서 "그래도 열기"를 한 번 눌러야 합니다.</li><li>일회성 권한 두 개 — 화면 기록, 그다음 자동 ⌘V용 손쉬운 사용. 손쉬운 사용을 허용하기 전에는 클립보드 복사까지만 됩니다.</li><li>소스에서 재빌드하면 권한이 초기화되도록 설계돼 있어, 다음 실행에서 깔끔하게 다시 물어봅니다.</li><li>계정도, 추적도, 결제 유도도 없습니다.</li>',
+    s6k:"직접 써 보기", s6h:"받아서, 빌드하고, 단축키에 연결.",
+    s6p:'macOS 14+와 Xcode Command Line Tools가 필요합니다. <code>build.sh</code>가 빌드·애드혹 서명·<code>~/Applications</code> 설치까지 끝내면, 쓰던 런처 — Karabiner는 <kbd>⌘⇧2</kbd>로 제공 — 를 open 명령에 연결하세요.',
+    codeComment:"# 받아서 빌드",
+    codeComment2:"# 이 실행 명령에 단축키 연결",
+    footLab:"TechJuiceLab 작업실에서",
+    footP:"AIShot은 제가 만드는 작고 단단한 도구 중 하나예요 — 진짜 성가심 하나를 제대로 없애고 조용히 비켜서는 것들. 무료에 오픈소스, 무엇보다 제 Mac에서 쓰고 싶어서 만들었습니다.",
+    lkRel:"릴리스", lkDoc:"문서", lkIssues:"이슈"
+  };
+
+  const nodes = document.querySelectorAll('[data-i18n]');
+  const EN = {};
+  nodes.forEach(el => EN[el.dataset.i18n] = el.innerHTML);
+  function setLang(l){
+    document.documentElement.lang = l;
+    nodes.forEach(el => { const k = el.dataset.i18n; el.innerHTML = (l === 'ko' ? (KO[k] ?? EN[k]) : EN[k]); });
+    const b = document.getElementById('langBtn');
+    if(b) b.textContent = (l === 'ko' ? 'English' : '한국어');
+    try { localStorage.setItem('aishot_console_lang', l); } catch(e){}
+  }
+  function toggleLang(){ setLang(document.documentElement.lang === 'ko' ? 'en' : 'ko'); }
+  (function(){
+    let l; try { l = localStorage.getItem('aishot_console_lang'); } catch(e){}
+    if (l !== 'ko' && l !== 'en') l = (navigator.language || '').toLowerCase().startsWith('ko') ? 'ko' : 'en';
+    setLang(l);
+  })();
+
+  // ---- typewriter + reveals (degrades gracefully) ----
+  (function(){
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var reveals = Array.prototype.slice.call(document.querySelectorAll('[data-reveal]'));
+    if(!reduce){
+      reveals.forEach(function(el){ el.style.opacity='0'; el.style.transform='translateY(6px)'; el.style.transition='opacity .5s ease, transform .5s ease'; });
+    }
+    function showReveals(){
+      reveals.forEach(function(el,i){ setTimeout(function(){ el.style.opacity='1'; el.style.transform='none'; }, i*90); });
+    }
+    var cmdEl = document.querySelector('[data-type]');
+    var headEl = document.querySelector('[data-type-head]');
+    if(reduce || !cmdEl || !headEl){ showReveals(); }
+    else {
+      var cmdText = cmdEl.textContent;
+      var headText = headEl.textContent;
+      cmdEl.textContent = '';
+      headEl.textContent = '';
+      var typeInto = function(el, text, speed, done){
+        var i = 0;
+        (function tick(){
+          if(i <= text.length){ el.textContent = text.slice(0,i); i++; setTimeout(tick, speed + (Math.random()*22)); }
+          else if(done){ done(); }
+        })();
+      };
+      setTimeout(function(){
+        typeInto(cmdEl, cmdText, 42, function(){
+          setTimeout(function(){ typeInto(headEl, headText, 30, showReveals); }, 260);
+        });
+      }, 380);
+    }
+
+    // section reveal on scroll
+    var secs = document.querySelectorAll('.reveal');
+    if(reduce || !('IntersectionObserver' in window)){
+      secs.forEach(function(s){ s.classList.add('in'); });
+    } else {
+      var io = new IntersectionObserver(function(es){
+        es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
+      },{threshold:.16});
+      secs.forEach(function(s){ io.observe(s); });
+    }
+  })();
+</script>
+</body>
+</html>
