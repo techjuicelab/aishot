@@ -13,6 +13,22 @@
                     "to": [{ "shell_command": "open -gn \"$HOME/Applications/AIShot.app\"" }]
                 }
             ]
+        },
+        {
+            "description": "AI Screenshot: left shift + right shift together launches AIShot (Codex-style)",
+            "manipulators": [
+                {
+                    "type": "basic",
+                    "from": {
+                        "simultaneous": [
+                            { "key_code": "left_shift" },
+                            { "key_code": "right_shift" }
+                        ],
+                        "simultaneous_options": { "key_down_order": "insensitive" }
+                    },
+                    "to": [{ "shell_command": "open -gn \"$HOME/Applications/AIShot.app\"" }]
+                }
+            ]
         }
     ]
 }

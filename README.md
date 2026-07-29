@@ -21,7 +21,7 @@ the app that was frontmost when you pressed the hotkey:
 |---|---|---|
 | Terminals & IDEs — Ghostty, Terminal, iTerm2, kitty, WezTerm, Warp, VS Code, Antigravity, Cursor | escaped **file path** + auto ⌘V | CLI agents (Claude Code, Codex CLI) read images from a path — same format as drag & drop |
 | AI apps & browsers — Claude, Codex, ChatGPT, Gemini, Safari, Chrome | the **PNG itself** + auto ⌘V | attaches as an image in the chat input |
-| Anything else | clipboard only, no keystroke | never pastes into the wrong place — hit ⌘V yourself wherever you want |
+| Anything else | **target app** ([below](#target-app--every-shot-lands-in-one-place)) if set: switches to it and pastes. Otherwise: clipboard only | your shot always reaches your AI app, no matter where you were — and with no target set, nothing pastes into the wrong place |
 
 Every capture is also **saved as a file** with the native macOS naming
 (`Screenshot 2026-07-08 at 11.09.27 AM.png`), so pasting and archiving happen
@@ -44,6 +44,45 @@ the system screenshot folder → `~/Desktop` (the macOS stock default).
 
 AIShot runs **only while invoked** — it captures, pastes, and exits.
 No menu bar item, no daemon, zero idle footprint.
+
+## Target app — every shot lands in one place
+
+The first two rows of the table (a terminal, IDE, or AI app in front) paste
+**right where you are**, as before. The target app is the destination for
+everything else — set it once and AIShot switches to it after the capture
+and pastes there:
+
+```sh
+defaults write com.techjuicelab.aishot targetApp claude
+```
+
+Aliases: `claude` · `codex` · `chatgpt` · `gemini` · `antigravity` ·
+`cursor` · `vscode` · `safari` · `chrome`. Any other app: use its bundle ID
+(`osascript -e 'id of app "SomeApp"'`).
+
+- Pastes only while the target is **already running** — if it isn't, AIShot
+  doesn't launch it and stops at the clipboard copy (the file is always saved).
+- The paste format follows the app's category: terminal/IDE-class apps like
+  Antigravity or Cursor get the file path, chat apps like Claude or Codex
+  get the PNG.
+- After pasting, focus stays in the target app (start typing your prompt).
+  To hop back to the app you were in before the capture:
+
+  ```sh
+  defaults write com.techjuicelab.aishot returnFocus -bool true
+  ```
+
+- Unset with: `defaults delete com.techjuicelab.aishot targetApp`
+
+You can also bind a hotkey that **always** sends the shot to one specific
+app, regardless of focus — `--target` applies to that run only and beats
+the stored setting:
+
+```sh
+open -gn "$HOME/Applications/AIShot.app" --args --target codex
+```
+
+Preview what your current setup would do with `--self-test`.
 
 ## Install
 
@@ -86,7 +125,8 @@ open -gn "$HOME/Applications/AIShot.app"
 
   then enable the "AIShot" rule in Karabiner-Elements → Complex
   Modifications → Add predefined rule. Ships as <kbd>⌘⇧2</kbd> — right next
-  to the system's ⌘⇧3/4/5 screenshot family.
+  to the system's ⌘⇧3/4/5 screenshot family. A **both-<kbd>⇧</kbd>-keys-at-once**
+  rule (Codex-style) is included too — enable it as well if you like.
 - **Alfred / Raycast / Shortcuts.app**: point a hotkey at the same `open` command.
 
 ## First-run permissions (one-time)
@@ -117,6 +157,7 @@ open -gn "$HOME/Applications/AIShot.app" --args --mode image
 | Flag | Description | Default |
 |---|---|---|
 | `--mode auto\|path\|image` | force the paste format instead of auto-detecting | `auto` |
+| `--target alias\|bundle-id` | send this run's shot to that app unconditionally (beats the stored target) | — |
 | `--out DIR` | destination folder (this run only) | see save-location order above |
 | `--choose-dir` | open a folder picker and save the choice as the app's default | — |
 | `--no-paste` | copy to clipboard only, never synthesize ⌘V | — |
