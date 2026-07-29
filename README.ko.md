@@ -21,7 +21,7 @@
 |---|---|---|
 | 터미널·IDE — Ghostty, Terminal, iTerm2, kitty, WezTerm, Warp, VS Code, Antigravity, Cursor | 이스케이프된 **파일 경로** + 자동 ⌘V | Claude Code·Codex CLI는 경로로 이미지를 읽음 (드래그&드롭과 같은 형식) |
 | AI 앱·브라우저 — Claude, Codex, ChatGPT, Gemini, Safari, Chrome | **PNG 이미지** + 자동 ⌘V | 채팅 입력창에 이미지로 첨부 |
-| 그 외 모든 앱 | 클립보드 복사만 (자동 ⌘V 없음) | 엉뚱한 곳에 붙는 사고 방지 — 원하는 곳에서 직접 ⌘V |
+| 그 외 모든 앱 | **지정 앱**([아래](#지정-앱--어디서-찍든-한-곳으로)) 설정 시: 그 앱으로 전환해 붙여넣기. 미설정 시: 클립보드 복사만 | 어디서 찍든 스크린샷이 늘 내 AI 앱에 도착 — 지정 안 했으면 엉뚱한 곳에 붙는 사고 방지 |
 
 모든 캡처는 macOS 기본 파일명(`Screenshot 2026-07-08 at 11.09.27 AM.png`)의
 **파일로도 저장**되므로 붙여넣기와 아카이빙이 한 동작에 끝난다.
@@ -42,6 +42,42 @@ open -na AIShot --args --choose-dir
 
 AIShot은 **호출될 때만 실행**된다 — 캡처하고, 붙여넣고, 종료.
 메뉴 막대 아이콘도, 데몬도 없고, 대기 중 점유율은 0이다.
+
+## 지정 앱 — 어디서 찍든 한 곳으로
+
+위 표의 첫 두 줄(터미널·IDE·AI 앱에 포커스 중)은 지금처럼 **그 자리에**
+붙여넣는다. 지정 앱은 그 외 "모르는 앱"에 포커스가 있을 때의 목적지다 —
+한 번 설정해두면 AIShot이 캡처 후 그 앱으로 전환해서 붙여넣는다:
+
+```sh
+defaults write com.techjuicelab.aishot targetApp claude
+```
+
+별칭: `claude` · `codex` · `chatgpt` · `gemini` · `antigravity` · `cursor` ·
+`vscode` · `safari` · `chrome`. 그 외 앱은 번들 ID를 그대로 적는다
+(`osascript -e 'id of app "SomeApp"'`).
+
+- 지정 앱이 **실행 중일 때만** 붙여넣는다 — 꺼져 있으면 앱을 띄우지 않고
+  클립보드 복사까지만 한다 (파일 저장은 항상 됨).
+- 붙여넣는 형식은 앱 분류를 따른다: Antigravity·Cursor처럼 터미널·IDE로
+  분류된 앱이면 파일 경로, Claude·Codex 같은 채팅 앱이면 PNG 이미지.
+- 붙여넣은 뒤 포커스는 지정 앱에 남는다(바로 프롬프트 타이핑). 캡처 전에
+  쓰던 앱으로 자동 복귀하고 싶으면:
+
+  ```sh
+  defaults write com.techjuicelab.aishot returnFocus -bool true
+  ```
+
+- 해제: `defaults delete com.techjuicelab.aishot targetApp`
+
+포커스와 무관하게 **무조건** 특정 앱으로 보내는 핫키를 따로 만들 수도 있다 —
+`--target`은 이 실행에만 적용되고 저장된 지정 앱보다 우선한다:
+
+```sh
+open -gn "$HOME/Applications/AIShot.app" --args --target codex
+```
+
+현재 설정으로 어떻게 동작할지는 `--self-test`로 미리 확인할 수 있다.
 
 ## 설치
 
@@ -82,7 +118,8 @@ open -gn "$HOME/Applications/AIShot.app"
 
   그다음 Karabiner-Elements → Complex Modifications → Add predefined rule에서
   "AIShot" 활성화. 기본 키는 <kbd>⌘⇧2</kbd> — 시스템 ⌘⇧3/4/5 스크린샷
-  패밀리 옆자리.
+  패밀리 옆자리. **양쪽 <kbd>⇧</kbd> 동시 누르기** 룰(Codex 스타일)도 같이
+  들어 있으니 원하면 추가로 활성화.
 - **Alfred / Raycast / 단축어 앱**: 같은 `open` 명령에 핫키 지정.
 
 ## 첫 실행 권한 (한 번만)
@@ -110,6 +147,7 @@ open -gn "$HOME/Applications/AIShot.app" --args --mode image
 | 플래그 | 설명 | 기본값 |
 |---|---|---|
 | `--mode auto\|path\|image` | 자동 감지 대신 붙여넣기 형식 강제 | `auto` |
+| `--target 별칭\|번들ID` | 이번 실행은 무조건 이 앱으로 (저장된 지정 앱보다 우선) | — |
 | `--out DIR` | 저장 폴더 (이번 실행만) | 위 저장 폴더 순서 참고 |
 | `--choose-dir` | 폴더 선택창을 열어 앱 기본 저장 폴더로 저장 | — |
 | `--no-paste` | 클립보드 복사까지만, 자동 ⌘V 안 함 | — |
