@@ -40,7 +40,7 @@ open -na AIShot --args --choose-dir
 ```
 
 Full resolution order: `--out DIR` flag → the app's own folder (set by
-`--choose-dir`, or `defaults write com.techjuicelab.aishot saveDir ...`) →
+`--choose-dir`, or `defaults write space.techjuicelab.aishot saveDir ...`) →
 the system screenshot folder → `~/Desktop` (the macOS stock default).
 
 AIShot separates control from capture: one lightweight **menu bar host** stays
@@ -103,17 +103,17 @@ the settings panel and the same values remain available from the CLI:
 open -na "$HOME/Applications/AIShot.app" --args --settings
 
 # select a destination
-defaults write com.techjuicelab.aishot targetApp claude
+defaults write space.techjuicelab.aishot targetApp claude
 
 # auto | image | path
-defaults write com.techjuicelab.aishot targetPasteMode image
+defaults write space.techjuicelab.aishot targetPasteMode image
 
 # optional: do not open a stopped destination; return after pasting
-defaults write com.techjuicelab.aishot autoLaunchTarget -bool false
-defaults write com.techjuicelab.aishot returnFocus -bool true
+defaults write space.techjuicelab.aishot autoLaunchTarget -bool false
+defaults write space.techjuicelab.aishot returnFocus -bool true
 
 # restore Automatic destination routing
-defaults delete com.techjuicelab.aishot targetApp
+defaults delete space.techjuicelab.aishot targetApp
 ```
 
 Destination aliases: `claude` · `codex` · `chatgpt` · `gemini` ·
@@ -143,9 +143,17 @@ cd aishot && ./build.sh   # builds, signs, installs, and starts the menu bar hos
 ```
 
 The build installs AIShot to `~/Applications`, writes
-`~/Library/LaunchAgents/com.techjuicelab.aishot.menubar.plist`, and starts the
+`~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist`, and starts the
 menu host immediately. The host starts automatically on later logins; captures
 remain separate one-shot processes.
+
+**Upgrading from an earlier install**: the bundle ID changed from
+`com.techjuicelab.aishot` to `space.techjuicelab.aishot`. macOS can wedge a
+bundle ID so its status item is created but never placed in the menu bar, and
+that state survives reboots and LaunchServices re-registration. Saved settings
+migrate to the new domain on first launch and `build.sh` retires the old
+LaunchAgent, but macOS sees a new app — **Screen Recording and Accessibility
+have to be granted once more**.
 
 **Or download** `AIShot.app.zip` from
 [Releases](https://github.com/techjuicelab/aishot/releases) and unzip into
@@ -204,7 +212,7 @@ Accessibility grants survive later rebuilds; no script edit is needed.
 Without that certificate, the build falls back to ad-hoc signing and an
 update may require permission approval again. The installer compares the new
 and previously installed designated requirements: it preserves TCC grants
-when they match, and runs `tccutil reset All com.techjuicelab.aishot` only
+when they match, and runs `tccutil reset All space.techjuicelab.aishot` only
 when the signing identity changed so the next capture re-prompts cleanly.
 
 ## Flags
@@ -235,8 +243,8 @@ Add apps to either category **without rebuilding** — AIShot reads two
 # find an app's bundle ID
 osascript -e 'id of app "SomeTerm"'
 
-defaults write com.techjuicelab.aishot extraPathApps  -array-add "com.example.someterm"
-defaults write com.techjuicelab.aishot extraImageApps -array-add "com.example.chatapp"
+defaults write space.techjuicelab.aishot extraPathApps  -array-add "com.example.someterm"
+defaults write space.techjuicelab.aishot extraImageApps -array-add "com.example.chatapp"
 ```
 
 Or edit `pathPasteIDs` / `imagePasteIDs` at the top of
@@ -245,11 +253,11 @@ Or edit `pathPasteIDs` / `imagePasteIDs` at the top of
 ## Uninstall
 
 ```sh
-launchctl bootout "gui/$UID/com.techjuicelab.aishot.menubar" 2>/dev/null || true
-rm -f ~/Library/LaunchAgents/com.techjuicelab.aishot.menubar.plist
+launchctl bootout "gui/$UID/space.techjuicelab.aishot.menubar" 2>/dev/null || true
+rm -f ~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist
 rm -rf ~/Applications/AIShot.app
-tccutil reset All com.techjuicelab.aishot
-defaults delete com.techjuicelab.aishot 2>/dev/null
+tccutil reset All space.techjuicelab.aishot
+defaults delete space.techjuicelab.aishot 2>/dev/null
 # and remove the hotkey rule from your launcher / Karabiner
 ```
 
