@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AIShot — one hotkey, straight to what you're typing</title>
-<meta name="description" content="A free, open-source macOS app that takes a screenshot and hands it to the app in front of you — a file path for terminals, the image for AI apps, clipboard for the rest. One hotkey, auto-paste, no Finder digging.">
+<title>AIShot — one hotkey, straight to the app you chose</title>
+<meta name="description" content="A free, open-source macOS screenshot tool with quick destinations in the menu bar — send every capture to Claude or another app as a PNG or file path.">
 <meta name="theme-color" content="#0d0f12">
 <meta name="application-name" content="AIShot">
 <meta name="apple-mobile-web-app-title" content="AIShot">
@@ -14,8 +14,8 @@
 <meta name="msapplication-TileColor" content="#0d0f12">
 <meta name="msapplication-TileImage" content="/mstile-150x150.png">
 <link rel="canonical" href="https://aishot.techjuicelab.site">
-<meta property="og:title" content="AIShot — one hotkey, straight to what you're typing">
-<meta property="og:description" content="Take a screenshot and hand it to the app you're already talking to — a file path for terminals, the image for AI apps, clipboard for the rest. Free and open source.">
+<meta property="og:title" content="AIShot — one hotkey, straight to the app you chose">
+<meta property="og:description" content="Switch destinations from the menu bar, capture a region or window, and send it straight to Claude or another app. Free and open source.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://aishot.techjuicelab.site">
 <meta property="og:image" content="/icon.png">
@@ -339,23 +339,23 @@
         <div class="term-title"><b>aishot</b> — zsh — 92×24</div>
       </div>
       <div class="screen">
-        <p class="cmd"><span class="pmt">~</span> <span class="path">$</span> <span class="flag" data-type>aishot --send</span></p>
+        <p class="cmd"><span class="pmt">~</span> <span class="path">$</span> <span class="flag" data-type>open -gna AIShot --args --capture</span></p>
 
         <div class="out">
-          <h1 class="headline"><span data-type-head data-i18n="h1">Take the shot. It lands where you're already typing.</span><span class="caret" aria-hidden="true"></span></h1>
+          <h1 class="headline"><span data-type-head data-i18n="h1">Take the shot. It lands in the app you chose.</span><span class="caret" aria-hidden="true"></span></h1>
         </div>
 
-        <p class="sub" data-reveal data-i18n="sub">One hotkey. AIShot grabs a screenshot and reads the app in front of you, then hands over whatever that app actually wants — no dragging, no "where did it save," no detour through Finder. <span class="c"># and it saves a real PNG every time, so you keep the file too.</span></p>
+        <p class="sub" data-reveal data-i18n="sub">Keep Claude, Antigravity IDE, or any other destination one click away in the menu bar. Every capture goes there no matter which app was in front — or choose Automatic to keep frontmost-aware routing. <span class="c"># every shot is still saved as a real PNG.</span></p>
 
         <ul class="facts" data-reveal>
-          <li data-i18n="fact1"><span class="k">$ frontmost</span><span>a terminal or IDE gets an escaped file path — exactly what a CLI agent needs.</span></li>
-          <li data-i18n="fact2"><span class="k">$ frontmost</span><span>an AI app or browser gets the PNG pasted straight in.</span></li>
-          <li data-i18n="fact3"><span class="k">$ idle</span><span>nothing runs in the background. It wakes only on the hotkey.</span></li>
+          <li data-i18n="fact1"><span class="k">$ destination</span><span>your chosen app receives every capture, regardless of what was frontmost.</span></li>
+          <li data-i18n="fact2"><span class="k">$ paste-as</span><span>Automatic, PNG image, or file path — choose what the destination receives.</span></li>
+          <li data-i18n="fact3"><span class="k">$ menu bar</span><span>capture, switch destination, open settings or the screenshot folder, and quit.</span></li>
         </ul>
 
         <div class="actions" data-reveal>
           <a class="btn btn-primary" href="https://github.com/techjuicelab/aishot" target="_blank" rel="noopener" data-i18n="ctaPrimary">Get it on GitHub</a>
-          <a class="btn btn-ghost" href="#how" data-i18n="ctaGhost">See where it pastes ↓</a>
+          <a class="btn btn-ghost" href="#how" data-i18n="ctaGhost">See how routing works ↓</a>
         </div>
       </div>
     </div>
@@ -376,37 +376,37 @@
 
   <section class="reveal"><div class="wrap">
     <p class="kicker" data-i18n="s2k">one hotkey, done</p>
-    <h2 data-i18n="s2h">Capture, and it's already in the conversation.</h2>
-    <p class="lead" data-i18n="s2p">Press your hotkey, drag a region — <span class="em">Space</span> grabs a whole window, <span class="em">Esc</span> cancels. The PNG saves to your normal screenshot folder <span class="em">and</span> lands in whatever app was frontmost, pasted for you with an automatic ⌘V. No Finder, no drag &amp; drop.</p>
+    <h2 data-i18n="s2h">Capture, and it's already in the conversation you chose.</h2>
+    <p class="lead" data-i18n="s2p">The lightweight viewfinder menu starts at login: switch destination, open Settings, or click <span class="em">Capture Screenshot…</span>. You can also press your hotkey and drag a region — <span class="em">Space</span> grabs a whole window, <span class="em">Esc</span> cancels. The one-shot capture process saves the PNG, hands it off, and exits.</p>
   </div></section>
 
   <section class="reveal" id="how"><div class="wrap">
     <p class="kicker" data-i18n="s3k">how it works</p>
-    <h2 data-i18n="s3h">It pastes the right thing for where you are.</h2>
+    <h2 data-i18n="s3h">Set one destination — or keep it Automatic.</h2>
 
     <div class="man">
       <div class="man-head"><span>AISHOT(1)</span><b>User Commands</b><span>AISHOT(1)</span></div>
       <div class="man-body">
         <h3 data-i18n="manNameLbl">Name</h3>
-        <p class="desc" data-i18n="howName">aishot — capture once, then hand the shot to whatever app is in front. The paste changes to fit; the saved file never does.</p>
+        <p class="desc" data-i18n="howName">aishot — choose a destination from the menu bar, then hand every shot there. Automatic preserves frontmost-app routing.</p>
 
-        <div class="synopsis" aria-label="synopsis" data-i18n="synopsis"><span class="key">hotkey</span><span class="arw">→</span>[ select region ]<span class="arw">→</span>read frontmost app<span class="arw">→</span>paste the right thing</div>
+        <div class="synopsis" aria-label="synopsis" data-i18n="synopsis"><span class="key">hotkey</span><span class="arw">→</span>[ select region ]<span class="arw">→</span>resolve destination<span class="arw">→</span>paste</div>
 
-        <div class="routes" role="table" aria-label="Where AIShot pastes, by app">
+        <div class="routes" role="table" aria-label="How AIShot chooses a destination and paste format">
           <div class="route" role="row" data-i18n="route1">
-            <span class="when" role="cell">terminal · IDE</span>
-            <span class="does" role="cell">pastes an escaped file path — what Claude Code and other CLI agents read.</span>
-            <span class="out-ex" role="cell">escaped path <span class="png">+ ⌘V</span></span>
+            <span class="when" role="cell">destination set</span>
+            <span class="does" role="cell">every capture goes to that app, even when another app was frontmost. It opens automatically by default.</span>
+            <span class="out-ex" role="cell">Auto · PNG · path</span>
           </div>
           <div class="route" role="row" data-i18n="route2">
-            <span class="when" role="cell">AI app · browser</span>
-            <span class="does" role="cell">pastes the PNG itself, dropped into the message box.</span>
-            <span class="out-ex" role="cell">PNG image <span class="png">+ ⌘V</span></span>
+            <span class="when" role="cell">Destination: Automatic</span>
+            <span class="does" role="cell">with Paste as Automatic, a supported frontmost terminal or IDE gets an escaped file path.</span>
+            <span class="out-ex" role="cell">escaped path <span class="png">+ ⌘V</span></span>
           </div>
           <div class="route" role="row" data-i18n="route3">
-            <span class="when" role="cell">anything else</span>
-            <span class="does" role="cell">switches to your designated app and pastes there — no target set, it copies to the clipboard, ready when you are.</span>
-            <span class="out-ex" role="cell">target app <span class="png">+ ⌘V</span></span>
+            <span class="when" role="cell">Destination: Automatic</span>
+            <span class="does" role="cell">with Paste as Automatic, a supported frontmost AI app gets the PNG; any other app gets clipboard-only.</span>
+            <span class="out-ex" role="cell">PNG <span class="png">+ ⌘V / clipboard</span></span>
           </div>
         </div>
 
@@ -415,7 +415,7 @@
         <div class="man-foot">
           <span data-i18n="foot1"><b>REQUIRES</b> macOS 14 Sonoma+</span>
           <span data-i18n="foot2"><b>LICENSE</b> MIT</span>
-          <span data-i18n="foot3"><b>FOOTPRINT</b> 0 background processes</span>
+          <span data-i18n="foot3"><b>HOST</b> lightweight menu bar control</span>
           <span data-i18n="foot4"><b>SAVES</b> your system screenshot folder</span>
         </div>
       </div>
@@ -425,14 +425,14 @@
   <section class="reveal"><div class="wrap">
     <p class="kicker" data-i18n="s4k">what it does</p>
     <h2 data-i18n="s4h">Small on the surface, precise underneath.</h2>
-    <p class="lead" data-i18n="s4p">Region or window, path or image, saved and pasted — every part is tuned to disappear into the one motion of showing the AI what you see.</p>
+    <p class="lead" data-i18n="s4p">Region or window, chosen app or Automatic, path or image — every part is tuned to make showing the AI what you see one motion.</p>
     <div class="grid">
       <div class="feat"><h3 data-i18n="f1t">Region or window</h3><p data-i18n="f1p">Drag any region, or hit Space to grab a whole window.</p></div>
-      <div class="feat"><h3 data-i18n="f2t">Format auto-detect</h3><p data-i18n="f2p">Path for terminals, image for chats — decided per app.</p></div>
-      <div class="feat"><h3 data-i18n="f3t">Automatic ⌘V</h3><p data-i18n="f3p">It pastes for you, so the shot lands right where your cursor is.</p></div>
+      <div class="feat"><h3 data-i18n="f2t">Paste format control</h3><p data-i18n="f2p">Choose Automatic, PNG image, or file path for your destination.</p></div>
+      <div class="feat"><h3 data-i18n="f3t">Destination auto-open</h3><p data-i18n="f3p">A configured app is opened when needed and activated before ⌘V by default.</p></div>
       <div class="feat"><h3 data-i18n="f4t">Saved as a file</h3><p data-i18n="f4p">Native macOS naming, archived the moment it's captured.</p></div>
-      <div class="feat"><h3 data-i18n="f5t">Zero setup</h3><p data-i18n="f5p">Follows your system screenshot folder, even if you moved it.</p></div>
-      <div class="feat"><h3 data-i18n="f6t">No idle footprint</h3><p data-i18n="f6p">Runs only when invoked. No menu bar item, no daemon.</p></div>
+      <div class="feat"><h3 data-i18n="f5t">Menu-bar control</h3><p data-i18n="f5p">Capture, switch installed destinations, open Settings or your screenshot folder, and quit.</p></div>
+      <div class="feat"><h3 data-i18n="f6t">One-shot capture workers</h3><p data-i18n="f6p">The menu host stays ready; each capture runs separately and exits when the handoff is done.</p></div>
     </div>
   </div></section>
 
@@ -441,23 +441,25 @@
     <h2 data-i18n="s5h">Honest tools age better than magic ones.</h2>
     <p class="lead" data-i18n="s5p">MIT-licensed, with the full source on GitHub. And the rough edges, up front:</p>
     <div class="honest"><ul data-i18n="s5list">
-      <li>Ad-hoc signed, not notarized — first launch needs a one-time "Open Anyway" under Privacy &amp; Security.</li>
+      <li>Not notarized — downloaded builds need a one-time "Open Anyway" under Privacy &amp; Security.</li>
       <li>Two one-time permissions: Screen Recording, then Accessibility for the synthesized ⌘V. Until Accessibility is granted it still copies to the clipboard.</li>
-      <li>Rebuilding from source resets its permission grants by design, so the next launch re-prompts cleanly.</li>
+      <li>If a configured destination cannot be opened or activated, AIShot sends no ⌘V and leaves the capture on the clipboard.</li>
+      <li>Source builds automatically use a <code>TechJuice Local Code Signing</code> certificate when available. The installer preserves permissions while the signing requirement matches and resets only when it changes; without the certificate, ad-hoc updates may need reapproval.</li>
       <li>No account, no telemetry, no upsell.</li>
     </ul></div>
   </div></section>
 
   <section class="reveal" id="install"><div class="wrap">
     <p class="kicker" data-i18n="s6k">run it yourself</p>
-    <h2 data-i18n="s6h">Clone, build, bind a hotkey.</h2>
-    <p class="req" data-i18n="s6p">You'll need macOS 14+ and Xcode Command Line Tools. <code>build.sh</code> builds, ad-hoc signs, and installs to <code>~/Applications</code>. Then point any launcher — Karabiner ships <kbd>⌘⇧2</kbd> — at the open command.</p>
+    <h2 data-i18n="s6h">Clone, build, pick a destination, capture.</h2>
+    <p class="req" data-i18n="s6p">You'll need macOS 14+ and Xcode Command Line Tools. <code>build.sh</code> uses the stable local signing certificate when available (ad-hoc fallback), installs to <code>~/Applications</code>, and starts the menu host now and after login. Choose a destination from the new menu; Karabiner also ships <kbd>⌘⇧2</kbd> for one-shot capture.</p>
     <div class="code"><span class="c" data-i18n="codeComment"># get the code and build</span>
 <span class="pmt">$</span> git clone https://github.com/techjuicelab/aishot.git
 <span class="pmt">$</span> cd aishot &amp;&amp; ./build.sh
 
-<span class="c" data-i18n="codeComment2"># bind a hotkey to this launch command</span>
-<span class="pmt">$</span> open -gn "$HOME/Applications/AIShot.app"</div>
+<span class="c" data-i18n="codeCommentMenu"># the menu host is running now and returns after login</span>
+<span class="c" data-i18n="codeComment2"># capture directly or bind a hotkey to this command</span>
+<span class="pmt">$</span> open -gn "$HOME/Applications/AIShot.app" --args --capture</div>
     <div class="actions">
       <a class="btn btn-primary" href="https://github.com/techjuicelab/aishot" target="_blank" rel="noopener" data-i18n="ctaPrimary2">Get it on GitHub</a>
       <a class="btn btn-ghost" href="https://github.com/techjuicelab/aishot/releases" target="_blank" rel="noopener" data-i18n="ctaReleases">Releases ↗</a>
@@ -480,44 +482,45 @@
   const KO = {
     ghostMeta:"macOS 14+ · MIT",
     eyebrow:"aishot · macOS 캡처",
-    h1:"찍기만 하세요. 지금 타이핑하던 그 자리에 그대로 꽂힙니다.",
-    sub:'단축키 하나. AIShot이 스크린샷을 찍고 눈앞의 앱을 읽은 뒤, 그 앱이 실제로 원하는 형식으로 건네줍니다 — 드래그도, "어디 저장됐지"도, Finder를 거칠 일도 없이. <span class="c"># 게다가 매번 진짜 PNG로 저장돼, 파일도 그대로 남습니다.</span>',
-    fact1:'<span class="k">$ frontmost</span><span>터미널·IDE엔 이스케이프된 파일 경로 — CLI 에이전트가 딱 원하는 형식.</span>',
-    fact2:'<span class="k">$ frontmost</span><span>AI 앱·브라우저엔 PNG 이미지를 바로 붙여넣기.</span>',
-    fact3:'<span class="k">$ idle</span><span>백그라운드에 아무것도 없음. 단축키를 눌러야만 깨어납니다.</span>',
-    ctaPrimary:"GitHub에서 받기", ctaPrimary2:"GitHub에서 받기", ctaGhost:"어디에 붙는지 보기 ↓",
+    h1:"찍기만 하세요. 정해 둔 앱으로 바로 들어갑니다.",
+    sub:'Claude, Antigravity IDE 또는 원하는 앱을 메뉴 막대에서 한 번에 바꾸세요. 무엇이 최전면이든 모든 캡처가 그곳으로 갑니다. 최전면 앱별 라우팅을 유지하려면 Automatic을 고르면 됩니다. <span class="c"># 모든 캡처는 진짜 PNG 파일로도 저장됩니다.</span>',
+    fact1:'<span class="k">$ 목적지</span><span>무엇이 최전면이든 선택한 앱이 모든 캡처를 받습니다.</span>',
+    fact2:'<span class="k">$ 붙여넣기</span><span>자동, PNG 이미지, 파일 경로 — 목적지가 받을 형식을 고릅니다.</span>',
+    fact3:'<span class="k">$ 메뉴 막대</span><span>캡처, 목적지 전환, 설정·스크린샷 폴더 열기, 종료까지.</span>',
+    ctaPrimary:"GitHub에서 받기", ctaPrimary2:"GitHub에서 받기", ctaGhost:"라우팅 방식 보기 ↓",
     ctaReleases:"릴리스 ↗",
     marqueeTag:"영역 선택",
     marqueeText:'<b>단축키</b> → 영역 드래그 → 놓기. <span class="dim">Space = 창 · Esc = 취소 · 눈 깜짝할 새 클립보드로.</span>',
     s1k:"진짜 번거로움", s1h:"번거로운 건 스크린샷이 아니었어요.",
     s1p:'화면을 AI에게 보여주려면 캡처를 하고 — 그다음 Finder에서 파일을 찾거나 채팅 창으로 끌어다 놓죠. 매번요. <span class="em">힘든 건 찍는 게 아니라, 찍고 난 뒤의 그 왔다 갔다입니다.</span>',
-    s2k:"단축키 한 번이면", s2h:"찍는 순간, 이미 대화 안에 들어가 있습니다.",
-    s2p:'단축키를 누르고 영역을 드래그하세요 — <span class="em">Space</span>로 창 전체, <span class="em">Esc</span>로 취소. PNG는 평소 스크린샷 폴더에 저장되는 <span class="em">동시에</span>, 방금까지 최전면에 있던 앱으로 들어가 자동 ⌘V까지 됩니다. Finder도, 드래그&드롭도 필요 없어요.',
-    s3k:"동작 원리", s3h:"지금 있는 곳에 맞는 걸 붙여넣습니다.",
+    s2k:"단축키 한 번이면", s2h:"찍는 순간, 지정한 대화 안에 들어가 있습니다.",
+    s2p:'가벼운 뷰파인더 메뉴가 로그인할 때 시작됩니다. 목적지를 바꾸거나 Settings를 열고, <span class="em">Capture Screenshot…</span>을 누르세요. 단축키로 영역을 드래그해도 됩니다 — <span class="em">Space</span>로 창 전체, <span class="em">Esc</span>로 취소. 일회성 캡처 프로세스는 PNG를 저장·전달한 뒤 종료됩니다.',
+    s3k:"동작 원리", s3h:"목적지를 하나 정하거나, Automatic을 유지하세요.",
     manNameLbl:"이름",
-    howName:"aishot — 한 번 캡처하면, 최전면에 있는 앱이 무엇이든 그 앱에 건네줍니다. 붙여넣는 형식은 상황에 맞게 바뀌지만, 저장되는 파일은 언제나 그대로입니다.",
-    synopsis:'<span class="key">단축키</span><span class="arw">→</span>[ 영역 선택 ]<span class="arw">→</span>최전면 앱 확인<span class="arw">→</span>맞는 걸 붙여넣기',
-    route1:'<span class="when">터미널 · IDE</span><span class="does">이스케이프된 파일 경로를 붙여넣기 — Claude Code 등 CLI 에이전트가 읽는 형식.</span><span class="out-ex">이스케이프 경로 <span class="png">+ ⌘V</span></span>',
-    route2:'<span class="when">AI 앱 · 브라우저</span><span class="does">PNG 이미지 그대로, 메시지 입력창에 붙여넣기.</span><span class="out-ex">PNG 이미지 <span class="png">+ ⌘V</span></span>',
-    route3:'<span class="when">그 외 모든 앱</span><span class="does">지정 앱을 설정했다면 그 앱으로 전환해 붙여넣기 — 없으면 클립보드에 복사해 두고 대기.</span><span class="out-ex">지정 앱 <span class="png">+ ⌘V</span></span>',
+    howName:"aishot — 메뉴 막대에서 목적지를 고르면 모든 캡처를 그곳으로 건네줍니다. Automatic은 최전면 앱별 라우팅을 유지합니다.",
+    synopsis:'<span class="key">단축키</span><span class="arw">→</span>[ 영역 선택 ]<span class="arw">→</span>목적지 결정<span class="arw">→</span>붙여넣기',
+    route1:'<span class="when">목적지 지정</span><span class="does">다른 앱이 최전면이어도 모든 캡처가 지정 앱으로 갑니다. 기본적으로 필요할 때 자동 실행합니다.</span><span class="out-ex">자동 · PNG · 경로</span>',
+    route2:'<span class="when">목적지: Automatic</span><span class="does">Paste as도 Automatic이면 지원하는 최전면 터미널·IDE에 이스케이프된 파일 경로를 붙여넣습니다.</span><span class="out-ex">이스케이프 경로 <span class="png">+ ⌘V</span></span>',
+    route3:'<span class="when">목적지: Automatic</span><span class="does">Paste as도 Automatic이면 지원하는 최전면 AI 앱에는 PNG를 붙이고, 그 외 앱에서는 클립보드 복사만 합니다.</span><span class="out-ex">PNG <span class="png">+ ⌘V / 클립보드</span></span>',
     savedNote:'그리고 언제나 — <span class="png">진짜 파일로도 저장</span> <span class="dim">· Screenshot 2026-07-08 at 11.09.27 AM.png</span>',
     foot1:'<b>필요</b> macOS 14 Sonoma+', foot2:'<b>라이선스</b> MIT',
-    foot3:'<b>점유율</b> 백그라운드 프로세스 0', foot4:'<b>저장</b> 시스템 스크린샷 폴더',
+    foot3:'<b>호스트</b> 가벼운 메뉴 막대 제어', foot4:'<b>저장</b> 시스템 스크린샷 폴더',
     s4k:"하는 일", s4h:"겉은 단순하게, 속은 촘촘하게.",
-    s4p:"영역이냐 창이냐, 경로냐 이미지냐, 저장하고 붙여넣기까지 — 모든 조각이 '본 것을 AI에게 보여준다'는 한 동작 속으로 사라지도록 다듬었습니다.",
+    s4p:"영역이냐 창이냐, 지정 앱이냐 Automatic이냐, 경로냐 이미지냐 — 모든 조각이 '본 것을 AI에게 보여준다'는 한 동작 속으로 사라지도록 다듬었습니다.",
     f1t:"영역 또는 창", f1p:"원하는 영역을 드래그하거나, Space로 창 전체를 잡으세요.",
-    f2t:"형식 자동 감지", f2p:"터미널엔 경로, 채팅엔 이미지 — 앱마다 알아서 판단.",
-    f3t:"자동 ⌘V", f3p:"대신 붙여넣어 주니, 커서가 있는 그 자리에 바로 꽂힙니다.",
+    f2t:"붙여넣기 형식 설정", f2p:"목적지에 맞춰 자동, PNG 이미지, 파일 경로 중 선택.",
+    f3t:"목적지 자동 실행", f3p:"기본적으로 지정 앱을 필요할 때 열고, 활성화한 뒤 ⌘V까지.",
     f4t:"파일로도 저장", f4p:"macOS 기본 파일명으로, 찍는 순간 함께 보관.",
-    f5t:"설정 필요 없음", f5p:"시스템 스크린샷 폴더를 그대로 따라갑니다. 옮겨놔도요.",
-    f6t:"대기 점유율 0", f6p:"호출될 때만 실행. 메뉴 막대 아이콘도, 데몬도 없습니다.",
+    f5t:"메뉴 막대 제어", f5p:"캡처, 설치된 목적지 전환, Settings·스크린샷 폴더 열기, 종료까지.",
+    f6t:"일회성 캡처 워커", f6p:"메뉴 호스트는 대기하고, 각 캡처는 별도로 실행되어 전달이 끝나면 종료.",
     s5k:"솔직하게", s5h:"솔직한 도구가 더 오래갑니다.",
     s5p:"MIT 라이선스에 전체 소스가 GitHub에 공개돼 있습니다. 아쉬운 점도 먼저 말씀드릴게요:",
-    s5list:'<li>공증이 아닌 애드혹 서명이라, 첫 실행 때 개인정보 보호 및 보안에서 "그래도 열기"를 한 번 눌러야 합니다.</li><li>일회성 권한 두 개 — 화면 기록, 그다음 자동 ⌘V용 손쉬운 사용. 손쉬운 사용을 허용하기 전에는 클립보드 복사까지만 됩니다.</li><li>소스에서 재빌드하면 권한이 초기화되도록 설계돼 있어, 다음 실행에서 깔끔하게 다시 물어봅니다.</li><li>계정도, 추적도, 결제 유도도 없습니다.</li>',
-    s6k:"직접 써 보기", s6h:"받아서, 빌드하고, 단축키에 연결.",
-    s6p:'macOS 14+와 Xcode Command Line Tools가 필요합니다. <code>build.sh</code>가 빌드·애드혹 서명·<code>~/Applications</code> 설치까지 끝내면, 쓰던 런처 — Karabiner는 <kbd>⌘⇧2</kbd>로 제공 — 를 open 명령에 연결하세요.',
+    s5list:'<li>공증되지 않아 다운로드 빌드는 개인정보 보호 및 보안에서 "그래도 열기"를 한 번 눌러야 합니다.</li><li>일회성 권한 두 개 — 화면 기록, 그다음 자동 ⌘V용 손쉬운 사용. 손쉬운 사용을 허용하기 전에는 클립보드 복사까지만 됩니다.</li><li>지정 목적지를 실행하거나 활성화하지 못하면 ⌘V를 보내지 않고 캡처를 클립보드에 남깁니다.</li><li>소스 빌드는 <code>TechJuice Local Code Signing</code> 인증서가 있으면 자동 사용합니다. 설치기는 서명 requirement가 같으면 권한을 보존하고 달라질 때만 초기화하며, 인증서가 없는 애드혹 업데이트는 재승인이 필요할 수 있습니다.</li><li>계정도, 추적도, 결제 유도도 없습니다.</li>',
+    s6k:"직접 써 보기", s6h:"받아서, 빌드하고, 목적지를 골라 캡처.",
+    s6p:'macOS 14+와 Xcode Command Line Tools가 필요합니다. <code>build.sh</code>는 안정적인 로컬 서명 인증서가 있으면 사용하고(없으면 애드혹 대체), <code>~/Applications</code> 설치 후 메뉴 호스트를 즉시 시작해 로그인 때도 띄웁니다. 새 메뉴에서 목적지를 고르세요. Karabiner에는 일회성 캡처용 <kbd>⌘⇧2</kbd>도 들어 있습니다.',
     codeComment:"# 받아서 빌드",
-    codeComment2:"# 이 실행 명령에 단축키 연결",
+    codeCommentMenu:"# 메뉴 호스트가 지금 실행되고 로그인 뒤에도 다시 시작",
+    codeComment2:"# 직접 캡처하거나 이 명령에 단축키 연결",
     footLab:"TechJuiceLab 작업실에서",
     footP:"AIShot은 제가 만드는 작고 단단한 도구 중 하나예요 — 진짜 성가심 하나를 제대로 없애고 조용히 비켜서는 것들. 무료에 오픈소스, 무엇보다 제 Mac에서 쓰고 싶어서 만들었습니다.",
     lkRel:"릴리스", lkDoc:"문서", lkIssues:"이슈"

@@ -6,7 +6,7 @@
 
 <p align="center">
   단축키 한 번: 스크린샷 → <b>지금 대화 중인 AI 앱에 바로</b>.<br>
-  <i>Finder 뒤지기 없음 · 드래그&드롭 없음 · 상주 프로세스 없음</i>
+  <i>Finder 뒤지기 없음 · 드래그&드롭 없음 · 메뉴 막대에서 목적지 바로 전환</i>
 </p>
 
 <p align="center"><a href="README.md">English</a></p>
@@ -14,19 +14,20 @@
 ---
 
 단축키 → 영역 드래그(<kbd>Space</kbd>로 창 선택, <kbd>Esc</kbd> 취소) → PNG가
-기존 스크린샷 폴더에 저장되는 **동시에**, 단축키를 누른 순간 최전면에 있던
-앱으로 들어간다:
+기존 스크린샷 폴더에 저장되는 **동시에**, [메뉴 막대 또는 설정](#메뉴-막대)에서
+고른 목적지로 들어간다:
 
-| 최전면 앱 | 붙여넣는 것 | 이유 |
+| 목적지 설정 | 모든 캡처가 가는 곳 | 붙여넣는 형식 |
 |---|---|---|
-| 터미널·IDE — Ghostty, Terminal, iTerm2, kitty, WezTerm, Warp, VS Code, Antigravity, Cursor | 이스케이프된 **파일 경로** + 자동 ⌘V | Claude Code·Codex CLI는 경로로 이미지를 읽음 (드래그&드롭과 같은 형식) |
-| AI 앱·브라우저 — Claude, Codex, ChatGPT, Gemini, Safari, Chrome | **PNG 이미지** + 자동 ⌘V | 채팅 입력창에 이미지로 첨부 |
-| 그 외 모든 앱 | **지정 앱**([아래](#지정-앱--어디서-찍든-한-곳으로)) 설정 시: 그 앱으로 전환해 붙여넣기. 미설정 시: 클립보드 복사만 | 어디서 찍든 스크린샷이 늘 내 AI 앱에 도착 — 지정 안 했으면 엉뚱한 곳에 붙는 사고 방지 |
+| 특정 앱 — Claude, Antigravity, ChatGPT, Codex 또는 다른 앱 | 무엇이 최전면이었든 그 앱. 필요하면 기본적으로 AIShot이 앱을 실행 | **자동**, **PNG 이미지**, **파일 경로** 중 설정 가능 |
+| 목적지 **Automatic** + 최전면 터미널·IDE — Ghostty, Terminal, iTerm2, kitty, WezTerm, Warp, VS Code, Antigravity, Cursor | 최전면 앱 | Paste as **Automatic**일 때: 이스케이프된 **파일 경로** + 자동 ⌘V |
+| 목적지 **Automatic** + 최전면 AI 앱·브라우저 — Claude, Codex, ChatGPT, Gemini, Safari, Chrome | 최전면 앱 | Paste as **Automatic**일 때: **PNG 이미지** + 자동 ⌘V |
+| 목적지 **Automatic** + 그 외 모든 앱 | 클립보드 복사만 하고 ⌘V는 보내지 않음 | Paste as **Automatic**일 때: 수동으로 붙여넣을 수 있는 **PNG 이미지** |
 
 모든 캡처는 macOS 기본 파일명(`Screenshot 2026-07-08 at 11.09.27 AM.png`)의
 **파일로도 저장**되므로 붙여넣기와 아카이빙이 한 동작에 끝난다.
 
-**설정 필요 없음**: AIShot은 macOS가 ⌘⇧3/4/5 스크린샷을 저장하는 폴더에
+**저장 폴더 설정은 필요 없음**: AIShot은 macOS가 ⌘⇧3/4/5 스크린샷을 저장하는 폴더에
 그대로 저장한다. 스크린샷 폴더를 옮겨놨다면(시스템 설정 /
 `defaults write com.apple.screencapture location`) 자동으로 따라간다.
 일반 스크린샷과 **다른** 폴더에 AIShot 캡처만 모으고 싶을 때만 내장 폴더
@@ -40,38 +41,84 @@ open -na AIShot --args --choose-dir
 `defaults write com.techjuicelab.aishot saveDir ...`) → 시스템 스크린샷 폴더
 → `~/Desktop`(macOS 순정 기본값).
 
-AIShot은 **호출될 때만 실행**된다 — 캡처하고, 붙여넣고, 종료.
-메뉴 막대 아이콘도, 데몬도 없고, 대기 중 점유율은 0이다.
+AIShot은 제어와 캡처를 분리한다. 가벼운 **메뉴 막대 호스트** 하나가 목적지
+전환을 위해 대기하고, 실제 캡처는 매번 별도의 단기 프로세스에서 실행되어
+저장·붙여넣기가 끝나는 즉시 종료된다.
+
+## 메뉴 막대
+
+`build.sh`는 메뉴 막대 호스트 하나를 설치해 즉시 시작하고, 사용자 LaunchAgent로
+등록해 로그인할 때마다 다시 띄운다. 뷰파인더 아이콘을 누르면 다음 항목이 나온다:
+
+- **Capture Screenshot…** — 단축키와 같은 일회성 영역 캡처를 시작.
+- **Destination: _현재 앱_** — **Automatic (Frontmost App)**과 설치된 프리셋
+  사이를 빠르게 전환. 현재 선택에는 체크 표시가 붙고,
+  **More Destinations in Settings…**에서 전체 선택창을 연다.
+- **Settings…** — 어떤 앱이든 목적지로 고르고 붙여넣기 형식, 목적지 자동 실행,
+  포커스 복귀를 설정하는 기본 진입점.
+- **Open Screenshot Folder** — 현재 AIShot 저장 폴더 열기.
+- **Quit AIShot** — 이번 세션의 메뉴 호스트 종료. 다음 로그인 때 LaunchAgent가
+  다시 시작한다.
+
+메뉴 아이콘이 보이지 않으면 단일 호스트를 직접 시작할 수 있다:
+
+```sh
+open -gn "$HOME/Applications/AIShot.app" --args --menubar
+```
 
 ## 지정 앱 — 어디서 찍든 한 곳으로
 
-위 표의 첫 두 줄(터미널·IDE·AI 앱에 포커스 중)은 지금처럼 **그 자리에**
-붙여넣는다. 지정 앱은 그 외 "모르는 앱"에 포커스가 있을 때의 목적지다 —
-한 번 설정해두면 AIShot이 캡처 후 그 앱으로 전환해서 붙여넣는다:
+**AIShot 메뉴 막대 → Settings…**를 연다. Claude, Antigravity, ChatGPT,
+Codex, Gemini 같은 프리셋을 고르거나
+**Choose Other…**로 설치된 어떤 `.app`이든 선택할 수 있다. 목적지를 지정하면
+**어떤 앱이 최전면이었는지와 무관하게 모든 캡처가 그곳으로 간다**.
+
+같은 설정창에서 다음 항목도 고를 수 있다:
+
+- **Paste as**: **Automatic**은 알려진 터미널·IDE 목적지에는 파일 경로를,
+  그 외 목적지에는 PNG를 쓴다. **PNG image** 또는 **File path**로 형식을
+  고정할 수도 있으며 목적지가 Automatic일 때도 이 설정이 적용된다.
+- **Open the destination app when it is not running**: 기본으로 켜져 있다.
+  지정 앱이 꺼져 있으면 AIShot이 실행하고 최전면으로 가져와 붙여넣는다.
+  앱을 실행하거나 활성화하지 못하면 ⌘V를 보내지 않고 캡처를 클립보드에
+  남긴다(PNG 파일 저장은 항상 완료됨).
+- **Return to the previous app after pasting**: 기본으로 꺼져 있어 붙여넣은 뒤
+  지정 앱에 포커스가 남고, 바로 프롬프트를 입력할 수 있다.
+- 목적지의 **Automatic (frontmost app)**: 기존 최전면 라우팅을
+  그대로 유지한다. Paste as도 **Automatic**일 때 알려진 터미널·IDE에는 경로,
+  알려진 AI 앱·브라우저에는 PNG를 보내고, 지원하지 않는 앱에서는 클립보드
+  복사만 한다.
+
+### 고급: CLI와 `defaults`
+
+일반적인 설정은 메뉴 막대를 쓰면 된다. 스크립트나 dotfiles에서는 같은 설정창과
+값을 CLI로도 열거나 지정할 수 있다:
 
 ```sh
+# 메뉴 없이 같은 설정창 열기
+open -na "$HOME/Applications/AIShot.app" --args --settings
+
+# 목적지 지정
 defaults write com.techjuicelab.aishot targetApp claude
+
+# auto | image | path
+defaults write com.techjuicelab.aishot targetPasteMode image
+
+# 선택: 꺼진 목적지를 실행하지 않기, 붙여넣은 뒤 원래 앱으로 돌아오기
+defaults write com.techjuicelab.aishot autoLaunchTarget -bool false
+defaults write com.techjuicelab.aishot returnFocus -bool true
+
+# 목적지를 Automatic으로 복원
+defaults delete com.techjuicelab.aishot targetApp
 ```
 
-별칭: `claude` · `codex` · `chatgpt` · `gemini` · `antigravity` · `cursor` ·
-`vscode` · `safari` · `chrome`. 그 외 앱은 번들 ID를 그대로 적는다
+목적지 별칭: `claude` · `codex` · `chatgpt` · `gemini` · `antigravity` ·
+`antigravity-ide` · `cursor` · `vscode` · `safari` · `chrome`. 그 외 앱은
+선택창에서 고르거나 번들 ID로 지정한다
 (`osascript -e 'id of app "SomeApp"'`).
 
-- 지정 앱이 **실행 중일 때만** 붙여넣는다 — 꺼져 있으면 앱을 띄우지 않고
-  클립보드 복사까지만 한다 (파일 저장은 항상 됨).
-- 붙여넣는 형식은 앱 분류를 따른다: Antigravity·Cursor처럼 터미널·IDE로
-  분류된 앱이면 파일 경로, Claude·Codex 같은 채팅 앱이면 PNG 이미지.
-- 붙여넣은 뒤 포커스는 지정 앱에 남는다(바로 프롬프트 타이핑). 캡처 전에
-  쓰던 앱으로 자동 복귀하고 싶으면:
-
-  ```sh
-  defaults write com.techjuicelab.aishot returnFocus -bool true
-  ```
-
-- 해제: `defaults delete com.techjuicelab.aishot targetApp`
-
-포커스와 무관하게 **무조건** 특정 앱으로 보내는 핫키를 따로 만들 수도 있다 —
-`--target`은 이 실행에만 적용되고 저장된 지정 앱보다 우선한다:
+포커스와 무관하게 이번 실행만 특정 앱으로 보내는 핫키도 만들 수 있다.
+`--target`은 이번 실행에만 적용되고 저장된 목적지보다 우선한다:
 
 ```sh
 open -gn "$HOME/Applications/AIShot.app" --args --target codex
@@ -87,8 +134,13 @@ macOS 14 이상 (Apple Silicon / Intel).
 
 ```sh
 git clone https://github.com/techjuicelab/aishot.git
-cd aishot && ./build.sh   # 빌드 → 애드혹 서명 → ~/Applications 설치
+cd aishot && ./build.sh   # 빌드·서명·설치 후 메뉴 막대 호스트 시작
 ```
+
+`build.sh`는 AIShot을 `~/Applications`에 설치하고
+`~/Library/LaunchAgents/com.techjuicelab.aishot.menubar.plist`을 만든 뒤 메뉴
+호스트를 즉시 시작한다. 이후 로그인 때마다 호스트가 자동으로 뜨며, 실제 캡처는
+계속 별도의 일회성 프로세스로 실행된다.
 
 **또는** [Releases](https://github.com/techjuicelab/aishot/releases)에서
 `AIShot.app.zip`을 받아 `~/Applications`에 풀기. 공증(notarize)되지 않은 앱이라
@@ -100,14 +152,19 @@ xattr -dr com.apple.quarantine ~/Applications/AIShot.app
 
 한 번 실행한 뒤 시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"로 승인
 (macOS 15부터는 우클릭 → 열기 우회가 더 이상 통하지 않는다).
+다운로드한 앱 번들은 `build.sh`를 실행하지 않으므로, 승인 후 위의
+`--menubar` 명령으로 현재 세션의 메뉴 호스트를 시작한다.
 
 ## 단축키
 
 쓰고 있는 런처 아무거나 아래 명령에 연결:
 
 ```sh
-open -gn "$HOME/Applications/AIShot.app"
+open -gn "$HOME/Applications/AIShot.app" --args --capture
 ```
+
+인자 없이 실행해도 같은 일회성 캡처이므로 기존 런처와 Karabiner 룰은 그대로
+동작한다.
 
 - **Karabiner-Elements**:
 
@@ -131,12 +188,16 @@ open -gn "$HOME/Applications/AIShot.app"
 3. 첫 캡처 완료 후 → **손쉬운 사용** 프롬프트(자동 ⌘V용). 허용 전에는 클립보드
    복사까지만 동작하고, 허용한 다음 샷부터 자동 붙여넣기.
 
-**재빌드 주의**: 애드혹 서명이라 재빌드하면 코드 해시가 바뀌어 기존 TCC 권한이
-조용히 무효화된다 — 시스템 설정 토글은 켜져 보이지만 실제로는 무효(창 내용 없이
-배경화면만 찍히는 증상). 그래서 `build.sh`가 설치 후
-`tccutil reset All com.techjuicelab.aishot`을 실행해 다음 실행에서 프롬프트가
-다시 뜨게 한다. 자주 재빌드한다면 키체인 접근 → 인증서 지원에서 코드 서명용
-자체 서명 인증서를 만들어 `codesign` 라인을 바꾸면 권한이 빌드를 넘어 유지된다.
+**서명과 권한 유지**: `build.sh`는 키체인에 유효한 코드 서명 ID
+`TechJuice Local Code Signing`이 있으면 자동으로 사용한다. 이 인증서의 안정적인
+designated requirement 덕분에 이후 재빌드에서도 화면 기록·손쉬운 사용 권한이
+유지되며, 스크립트의 `codesign` 줄을 직접 바꿀 필요가 없다.
+
+해당 인증서가 없으면 애드혹 서명으로 대체되어 업데이트 후 권한을 다시 승인해야
+할 수 있다. 설치기는 새 앱과 기존 설치본의 designated requirement를 비교해,
+같으면 TCC 권한을 보존하고 서명 ID가 달라졌을 때만
+`tccutil reset All com.techjuicelab.aishot`을 실행한다. 이 경우 다음 캡처에서
+권한을 깔끔하게 다시 요청한다.
 
 ## 플래그
 
@@ -146,10 +207,13 @@ open -gn "$HOME/Applications/AIShot.app" --args --mode image
 
 | 플래그 | 설명 | 기본값 |
 |---|---|---|
+| `--capture` | 영역 캡처 한 번 실행 후 종료 (인자 없는 실행의 명시적 별칭) | 인자 없는 기본 동작 |
+| `--menubar` | **Quit AIShot** 전까지 단일 상주 메뉴 호스트 실행 | 설치된 LaunchAgent가 사용 |
 | `--mode auto\|path\|image` | 자동 감지 대신 붙여넣기 형식 강제 | `auto` |
-| `--target 별칭\|번들ID` | 이번 실행은 무조건 이 앱으로 (저장된 지정 앱보다 우선) | — |
+| `--target 별칭\|번들ID` | 이번 실행은 무조건 이 앱으로 (저장된 목적지보다 우선) | — |
 | `--out DIR` | 저장 폴더 (이번 실행만) | 위 저장 폴더 순서 참고 |
 | `--choose-dir` | 폴더 선택창을 열어 앱 기본 저장 폴더로 저장 | — |
+| `--settings` | 목적지·붙여넣기 형식·자동 실행·포커스 설정창 열기 | — |
 | `--no-paste` | 클립보드 복사까지만, 자동 ⌘V 안 함 | — |
 | `--timeout SEC` | 선택 UI 대기 시간 | `300` |
 | `--self-test` | 폴더·최전면 앱·권한 상태만 출력하고 종료 | — |
@@ -172,6 +236,8 @@ defaults write com.techjuicelab.aishot extraImageApps -array-add "com.example.ch
 ## 제거
 
 ```sh
+launchctl bootout "gui/$UID/com.techjuicelab.aishot.menubar" 2>/dev/null || true
+rm -f ~/Library/LaunchAgents/com.techjuicelab.aishot.menubar.plist
 rm -rf ~/Applications/AIShot.app
 tccutil reset All com.techjuicelab.aishot
 defaults delete com.techjuicelab.aishot 2>/dev/null
