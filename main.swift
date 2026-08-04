@@ -78,6 +78,33 @@ let targetPresets = [
 ]
 let targetAliases = Dictionary(uniqueKeysWithValues: targetPresets.map { ($0.alias, $0.bundleID) })
 
+// MARK: - interface language
+
+// The menu bar and the settings panel follow the system language and can be
+// pinned per machine:
+//   defaults write com.techjuicelab.aishot language ko   # ko | en | auto
+enum UILanguage: String {
+    case korean = "ko"
+    case english = "en"
+}
+
+func currentUILanguage() -> UILanguage {
+    if let raw = CFPreferencesCopyAppValue("language" as CFString,
+                                           "com.techjuicelab.aishot" as CFString) as? String,
+       let pinned = UILanguage(rawValue: raw.lowercased()) {
+        return pinned
+    }
+    return (Locale.preferredLanguages.first ?? "en").hasPrefix("ko") ? .korean : .english
+}
+
+// Mutable so the resident menu host can pick up a language change without a
+// restart; capture workers read it once at launch.
+var uiLanguage = currentUILanguage()
+
+func t(_ korean: String, _ english: String) -> String {
+    uiLanguage == .korean ? korean : english
+}
+
 let fm = FileManager.default
 let logPath = "/tmp/aishot.log"
 
@@ -131,6 +158,7 @@ var chooseDir = false
 var showSettings = false
 var showMenuBar = false
 var targetRaw: String? // --target alias|bundle-id: force the destination for this run
+var assumeFrontRaw: String? // --assume-front bundle-id: the app the menu host saw
 
 var argIt = CommandLine.arguments.dropFirst().makeIterator()
 while let arg = argIt.next() {
@@ -144,6 +172,9 @@ while let arg = argIt.next() {
     case "--target":
         guard let value = argIt.next() else { fail("--target requires an alias or bundle ID") }
         targetRaw = value
+    case "--assume-front":
+        guard let value = argIt.next() else { fail("--assume-front requires a bundle ID") }
+        assumeFrontRaw = value
     case "--no-paste":   paste = false
     case "--timeout":
         guard let value = argIt.next(), let seconds = Double(value), seconds > 0 else {
@@ -180,8 +211,35 @@ func screenshotFolder() -> String {
     return NSHomeDirectory() + "/Desktop"
 }
 
-// Snapshot the frontmost app first — this is the primary paste target.
-let front = NSWorkspace.shared.frontmostApplication
+// The explicitly pinned folder, if any. Nil means "follow the system location".
+func storedSaveDir() -> String? {
+    guard let d = CFPreferencesCopyAppValue("saveDir" as CFString,
+                                            "com.techjuicelab.aishot" as CFString) as? String,
+          !d.isEmpty else { return nil }
+    return (d as NSString).expandingTildeInPath
+}
+
+// The system screenshot location, shown as the "follow the system" choice.
+func systemScreenshotFolder() -> String {
+    if let d = CFPreferencesCopyAppValue("location" as CFString,
+                                         "com.apple.screencapture" as CFString) as? String,
+       !d.isEmpty {
+        return (d as NSString).expandingTildeInPath
+    }
+    return NSHomeDirectory() + "/Desktop"
+}
+
+// Snapshot the frontmost app first — this is the primary paste target. A
+// capture started from the menu bar can observe AIShot itself in front, so the
+// menu host forwards the app it saw before its menu opened; never route a
+// capture (or a focus return) back into AIShot.
+let front: NSRunningApplication? = {
+    let observed = NSWorkspace.shared.frontmostApplication
+    guard observed?.bundleIdentifier == "com.techjuicelab.aishot" else { return observed }
+    guard let assumed = assumeFrontRaw, assumed != "com.techjuicelab.aishot" else { return nil }
+    return NSRunningApplication.runningApplications(withBundleIdentifier: assumed)
+        .first { !$0.isTerminated }
+}()
 let frontID = front?.bundleIdentifier ?? "?"
 let frontName = front?.localizedName ?? "?"
 
@@ -260,17 +318,19 @@ func addTargetItem(to popup: NSPopUpButton, name: String, bundleID: String, sele
     if select { popup.select(item) }
 }
 
-final class TargetPickerController: NSObject {
+final class SettingsController: NSObject {
     let popup: NSPopUpButton
+    let folderPopup: NSPopUpButton
 
-    init(popup: NSPopUpButton) {
+    init(popup: NSPopUpButton, folderPopup: NSPopUpButton) {
         self.popup = popup
+        self.folderPopup = folderPopup
     }
 
     @objc func chooseOtherApplication(_ sender: Any?) {
         let panel = NSOpenPanel()
-        panel.title = "Choose a destination app"
-        panel.prompt = "Choose App"
+        panel.title = t("목적지 앱 선택", "Choose a destination app")
+        panel.prompt = t("선택", "Choose App")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -288,6 +348,26 @@ final class TargetPickerController: NSObject {
             ?? url.deletingPathExtension().lastPathComponent
         addTargetItem(to: popup, name: name, bundleID: bundleID, select: true)
     }
+
+    @objc func chooseSaveFolder(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.prompt = t("이 폴더 사용", "Use This Folder")
+        panel.message = t("AIShot: 스크린샷을 저장할 폴더를 고르세요",
+                          "AIShot: choose where screenshots are saved")
+        panel.directoryURL = URL(fileURLWithPath: screenshotFolder())
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        if let existing = folderPopup.itemArray.first(where: { ($0.representedObject as? String) == url.path }) {
+            folderPopup.select(existing)
+            return
+        }
+        folderPopup.addItem(withTitle: (url.path as NSString).abbreviatingWithTildeInPath)
+        folderPopup.lastItem?.representedObject = url.path
+        folderPopup.select(folderPopup.lastItem!)
+    }
 }
 
 func presentSettings() {
@@ -295,13 +375,13 @@ func presentSettings() {
     app.setActivationPolicy(.accessory)
     app.activate()
 
-    let destinationPopup = NSPopUpButton(frame: NSRect(x: 112, y: 150, width: 250, height: 26))
-    destinationPopup.addItem(withTitle: "Automatic (frontmost app)")
+    let destinationPopup = NSPopUpButton(frame: NSRect(x: 112, y: 217, width: 250, height: 26))
+    destinationPopup.addItem(withTitle: t("자동 (최전면 앱)", "Automatic (frontmost app)"))
     destinationPopup.lastItem?.representedObject = ""
     for preset in targetPresets {
         let installed = NSWorkspace.shared.urlForApplication(withBundleIdentifier: preset.bundleID) != nil
         let displayName = appDisplayName(bundleID: preset.bundleID)
-        let name = !installed ? preset.name + " (not installed)"
+        let name = !installed ? preset.name + t(" (미설치)", " (not installed)")
             : (displayName.caseInsensitiveCompare(preset.name) == .orderedSame
                 ? displayName : "\(preset.name) (\(displayName))")
         addTargetItem(to: destinationPopup, name: name,
@@ -314,53 +394,101 @@ func presentSettings() {
     }
     if storedTargetID == nil { destinationPopup.selectItem(at: 0) }
 
-    let chooseButton = NSButton(frame: NSRect(x: 372, y: 149, width: 148, height: 28))
-    chooseButton.title = "Choose Other…"
-    chooseButton.bezelStyle = .rounded
-    let picker = TargetPickerController(popup: destinationPopup)
-    chooseButton.target = picker
-    chooseButton.action = #selector(TargetPickerController.chooseOtherApplication(_:))
-
-    let formatPopup = NSPopUpButton(frame: NSRect(x: 112, y: 111, width: 250, height: 26))
-    for (title, value) in [("Automatic", "auto"), ("PNG image", "image"), ("File path", "path")] {
+    let formatPopup = NSPopUpButton(frame: NSRect(x: 112, y: 178, width: 250, height: 26))
+    for (title, value) in [(t("자동", "Automatic"), "auto"),
+                           (t("PNG 이미지", "PNG image"), "image"),
+                           (t("파일 경로", "File path"), "path")] {
         formatPopup.addItem(withTitle: title)
         formatPopup.lastItem?.representedObject = value
         if value == storedTargetMode { formatPopup.select(formatPopup.lastItem!) }
     }
 
-    let launchCheckbox = NSButton(checkboxWithTitle: "Open the destination app when it is not running",
-                                  target: nil, action: nil)
-    launchCheckbox.frame = NSRect(x: 112, y: 75, width: 408, height: 24)
+    let pinnedLanguage = (CFPreferencesCopyAppValue("language" as CFString,
+                                                    "com.techjuicelab.aishot" as CFString) as? String)?
+        .lowercased()
+    let languagePopup = NSPopUpButton(frame: NSRect(x: 112, y: 139, width: 250, height: 26))
+    for (title, value) in [(t("시스템 언어 따름", "Follow system language"), "auto"),
+                           ("한국어", "ko"), ("English", "en")] {
+        languagePopup.addItem(withTitle: title)
+        languagePopup.lastItem?.representedObject = value
+        if value == (pinnedLanguage == "ko" || pinnedLanguage == "en" ? pinnedLanguage : "auto") {
+            languagePopup.select(languagePopup.lastItem!)
+        }
+    }
+
+    let folderPopup = NSPopUpButton(frame: NSRect(x: 112, y: 100, width: 250, height: 26))
+    let systemFolder = (systemScreenshotFolder() as NSString).abbreviatingWithTildeInPath
+    folderPopup.addItem(withTitle: t("시스템 폴더 — \(systemFolder)", "System folder — \(systemFolder)"))
+    folderPopup.lastItem?.representedObject = ""
+    if let pinnedFolder = storedSaveDir() {
+        folderPopup.addItem(withTitle: (pinnedFolder as NSString).abbreviatingWithTildeInPath)
+        folderPopup.lastItem?.representedObject = pinnedFolder
+        folderPopup.select(folderPopup.lastItem!)
+    } else {
+        folderPopup.selectItem(at: 0)
+    }
+
+    let controller = SettingsController(popup: destinationPopup, folderPopup: folderPopup)
+
+    let chooseButton = NSButton(frame: NSRect(x: 372, y: 216, width: 148, height: 28))
+    chooseButton.title = t("다른 앱 선택…", "Choose Other…")
+    chooseButton.bezelStyle = .rounded
+    chooseButton.target = controller
+    chooseButton.action = #selector(SettingsController.chooseOtherApplication(_:))
+
+    let folderButton = NSButton(frame: NSRect(x: 372, y: 99, width: 148, height: 28))
+    folderButton.title = t("폴더 선택…", "Choose Folder…")
+    folderButton.bezelStyle = .rounded
+    folderButton.target = controller
+    folderButton.action = #selector(SettingsController.chooseSaveFolder(_:))
+
+    let launchCheckbox = NSButton(
+        checkboxWithTitle: t("목적지 앱이 꺼져 있으면 실행하기",
+                             "Open the destination app when it is not running"),
+        target: nil, action: nil)
+    launchCheckbox.frame = NSRect(x: 112, y: 68, width: 408, height: 24)
     launchCheckbox.state = autoLaunchTarget ? .on : .off
 
-    let returnCheckbox = NSButton(checkboxWithTitle: "Return to the previous app after pasting",
-                                  target: nil, action: nil)
-    returnCheckbox.frame = NSRect(x: 112, y: 43, width: 408, height: 24)
+    let returnCheckbox = NSButton(
+        checkboxWithTitle: t("붙여넣은 뒤 이전 앱으로 돌아가기",
+                             "Return to the previous app after pasting"),
+        target: nil, action: nil)
+    returnCheckbox.frame = NSRect(x: 112, y: 40, width: 408, height: 24)
     returnCheckbox.state = returnFocus ? .on : .off
 
-    let destinationLabel = NSTextField(labelWithString: "Destination")
-    destinationLabel.frame = NSRect(x: 0, y: 153, width: 102, height: 22)
-    destinationLabel.alignment = .right
-    let formatLabel = NSTextField(labelWithString: "Paste as")
-    formatLabel.frame = NSRect(x: 0, y: 114, width: 102, height: 22)
-    formatLabel.alignment = .right
-    let note = NSTextField(wrappingLabelWithString:
-        "The copied image or file path remains on the clipboard after AIShot pastes it.")
-    note.frame = NSRect(x: 112, y: 0, width: 408, height: 32)
-    note.textColor = .secondaryLabelColor
+    func label(_ text: String, y: CGFloat) -> NSTextField {
+        let field = NSTextField(labelWithString: text)
+        field.frame = NSRect(x: 0, y: y, width: 102, height: 22)
+        field.alignment = .right
+        return field
+    }
+    let destinationLabel = label(t("목적지", "Destination"), y: 220)
+    let formatLabel = label(t("붙여넣기 형식", "Paste as"), y: 181)
+    let languageLabel = label(t("언어", "Language"), y: 142)
+    let folderLabel = label(t("저장 폴더", "Save folder"), y: 103)
 
-    let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 184))
+    let note = NSTextField(wrappingLabelWithString: t(
+        "붙여넣은 뒤에도 이미지나 파일 경로는 클립보드에 그대로 남습니다. 언어를 바꾸면 메뉴 막대에는 바로, 이 창에는 다음에 열 때 반영됩니다.",
+        "The copied image or file path remains on the clipboard after AIShot pastes it. A language change applies to the menu bar right away and to this panel the next time it opens."))
+    note.frame = NSRect(x: 112, y: 0, width: 408, height: 34)
+    note.textColor = .secondaryLabelColor
+    note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+
+    let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 246))
     [destinationLabel, destinationPopup, chooseButton, formatLabel, formatPopup,
+     languageLabel, languagePopup, folderLabel, folderPopup, folderButton,
      launchCheckbox, returnCheckbox, note].forEach(accessory.addSubview)
 
     let alert = NSAlert()
-    alert.messageText = "AIShot Settings"
-    alert.informativeText = "Choose where every capture should go. Automatic keeps the original frontmost-app behavior."
+    alert.messageText = t("AIShot 설정", "AIShot Settings")
+    alert.informativeText = t(
+        "모든 캡처를 어디로 보낼지 고르세요. 자동은 기존처럼 최전면 앱을 따라갑니다.",
+        "Choose where every capture should go. Automatic keeps the original frontmost-app behavior.")
     alert.accessoryView = accessory
-    alert.addButton(withTitle: "Save")
-    alert.addButton(withTitle: "Cancel")
+    alert.addButton(withTitle: t("저장", "Save"))
+    alert.addButton(withTitle: t("취소", "Cancel"))
 
-    let response = withExtendedLifetime(picker) { alert.runModal() }
+    let response = withExtendedLifetime(controller) { alert.runModal() }
     guard response == .alertFirstButtonReturn else { return }
     let selectedID = (destinationPopup.selectedItem?.representedObject as? String) ?? ""
     let domain = "com.techjuicelab.aishot" as CFString
@@ -371,6 +499,12 @@ func presentSettings() {
     }
     let selectedMode = (formatPopup.selectedItem?.representedObject as? String) ?? "auto"
     CFPreferencesSetAppValue("targetPasteMode" as CFString, selectedMode as CFString, domain)
+    let selectedLanguage = (languagePopup.selectedItem?.representedObject as? String) ?? "auto"
+    CFPreferencesSetAppValue("language" as CFString,
+                             selectedLanguage == "auto" ? nil : selectedLanguage as CFString, domain)
+    let selectedFolder = (folderPopup.selectedItem?.representedObject as? String) ?? ""
+    CFPreferencesSetAppValue("saveDir" as CFString,
+                             selectedFolder.isEmpty ? nil : selectedFolder as CFString, domain)
     CFPreferencesSetAppValue("autoLaunchTarget" as CFString,
                              launchCheckbox.state == .on ? kCFBooleanTrue : kCFBooleanFalse, domain)
     CFPreferencesSetAppValue("returnFocus" as CFString,
@@ -379,6 +513,7 @@ func presentSettings() {
     log(selectedID.isEmpty
         ? "destination set to Automatic"
         : "destination set to \(destinationDisplayName(bundleID: selectedID)) (\(selectedID))")
+    log("save folder: \(selectedFolder.isEmpty ? "system location" : selectedFolder)")
 }
 
 // MARK: - menu bar
@@ -391,10 +526,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let hostLockFD: Int32
     private let preferencesDomain = "com.techjuicelab.aishot" as CFString
 
+    // The app in front before the status menu opened. Clicking a status item
+    // can make AIShot itself frontmost, which would strand an Automatic
+    // capture, so track activations continuously rather than reading the
+    // frontmost app at capture time.
+    private var lastExternalFront: String?
+
     init(hostLockFD: Int32) {
         self.hostLockFD = hostLockFD
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
+
+        statusItem.autosaveName = "com.techjuicelab.aishot.status"
+        statusItem.isVisible = true
 
         if let button = statusItem.button {
             let image = NSImage(systemSymbolName: "camera.viewfinder",
@@ -404,46 +548,82 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             if image == nil { button.title = "AI" }
         }
 
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        if let front, front != "com.techjuicelab.aishot" { lastExternalFront = front }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(applicationActivated(_:)),
+            name: NSWorkspace.didActivateApplicationNotification, object: nil)
+
         menu.autoenablesItems = false
         menu.delegate = self
+        rebuildMenu()
+        statusItem.menu = menu
+        log("menu bar host started (status item visible: \(statusItem.isVisible))")
+    }
 
-        let captureItem = NSMenuItem(title: "Capture Screenshot…",
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        Darwin.close(hostLockFD)
+    }
+
+    // Menu titles are built for the current language; rebuilt when it changes.
+    private func rebuildMenu() {
+        menu.removeAllItems()
+
+        let captureItem = NSMenuItem(title: t("스크린샷 찍기…", "Capture Screenshot…"),
                                      action: #selector(captureScreenshot(_:)), keyEquivalent: "")
         captureItem.target = self
         menu.addItem(captureItem)
         menu.addItem(.separator())
 
-        destinationItem.submenu = NSMenu(title: "Destination")
+        if destinationItem.submenu == nil {
+            destinationItem.submenu = NSMenu(title: "Destination")
+        }
         menu.addItem(destinationItem)
         menu.addItem(.separator())
 
-        let settingsItem = NSMenuItem(title: "Settings…",
+        let settingsItem = NSMenuItem(title: t("설정…", "Settings…"),
                                       action: #selector(openSettings(_:)), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = [.command]
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        let folderItem = NSMenuItem(title: "Open Screenshot Folder",
+        let folderItem = NSMenuItem(title: t("저장 폴더 열기", "Open Screenshot Folder"),
                                     action: #selector(openScreenshotFolder(_:)), keyEquivalent: "")
         folderItem.target = self
         menu.addItem(folderItem)
+
+        let changeFolderItem = NSMenuItem(title: t("저장 폴더 변경…", "Change Screenshot Folder…"),
+                                          action: #selector(changeScreenshotFolder(_:)),
+                                          keyEquivalent: "")
+        changeFolderItem.target = self
+        menu.addItem(changeFolderItem)
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit AIShot",
+        let quitItem = NSMenuItem(title: t("AIShot 종료", "Quit AIShot"),
                                   action: #selector(quit(_:)), keyEquivalent: "q")
         quitItem.keyEquivalentModifierMask = [.command]
         quitItem.target = self
         menu.addItem(quitItem)
 
         refreshDestinationMenu()
-        statusItem.menu = menu
     }
 
-    deinit {
-        Darwin.close(hostLockFD)
+    @objc private func applicationActivated(_ note: Notification) {
+        guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let bundleID = app.bundleIdentifier,
+              bundleID != "com.techjuicelab.aishot" else { return }
+        lastExternalFront = bundleID
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        CFPreferencesAppSynchronize(preferencesDomain)
+        let latest = currentUILanguage()
+        if latest != uiLanguage {
+            uiLanguage = latest
+            rebuildMenu()
+            return
+        }
         refreshDestinationMenu()
     }
 
@@ -457,14 +637,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func refreshDestinationMenu() {
         let currentID = currentDestinationID()
-        let currentName = currentID.map { destinationDisplayName(bundleID: $0) } ?? "Automatic"
-        destinationItem.title = "Destination: \(currentName)"
-        statusItem.button?.toolTip = "AIShot — Destination: \(currentName)"
+        let currentName = currentID.map { destinationDisplayName(bundleID: $0) }
+            ?? t("자동", "Automatic")
+        destinationItem.title = t("목적지: \(currentName)", "Destination: \(currentName)")
+        statusItem.button?.toolTip = t("AIShot — 목적지: \(currentName)",
+                                       "AIShot — Destination: \(currentName)")
 
         let submenu = destinationItem.submenu ?? NSMenu(title: "Destination")
         submenu.removeAllItems()
 
-        addDestinationItem(title: "Automatic (Frontmost App)", bundleID: nil,
+        addDestinationItem(title: t("자동 (최전면 앱)", "Automatic (Frontmost App)"), bundleID: nil,
                            selected: currentID == nil, to: submenu)
         submenu.addItem(.separator())
 
@@ -484,7 +666,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
 
         submenu.addItem(.separator())
-        let moreItem = NSMenuItem(title: "More Destinations in Settings…",
+        let moreItem = NSMenuItem(title: t("설정에서 다른 앱 고르기…", "More Destinations in Settings…"),
                                   action: #selector(openSettings(_:)), keyEquivalent: "")
         moreItem.target = self
         submenu.addItem(moreItem)
@@ -514,7 +696,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func captureScreenshot(_ sender: Any?) {
-        launchSibling(arguments: ["--capture"], activates: false)
+        var arguments = ["--capture"]
+        if let lastExternalFront { arguments += ["--assume-front", lastExternalFront] }
+        launchSibling(arguments: arguments, activates: false)
     }
 
     @objc private func selectDestination(_ sender: NSMenuItem) {
@@ -538,8 +722,29 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         NSWorkspace.shared.open(folder)
     }
 
+    @objc private func changeScreenshotFolder(_ sender: Any?) {
+        launchSibling(arguments: ["--choose-dir"], activates: true)
+    }
+
     @objc private func quit(_ sender: Any?) {
         NSApp.terminate(nil)
+    }
+}
+
+// A status item built before AppKit finishes launching the app never reaches
+// the menu bar: the NSStatusItem exists and reports a size, but it is parked
+// off-screen and stays invisible for the life of the process. Create it from
+// applicationDidFinishLaunching instead.
+final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
+    private let hostLockFD: Int32
+    private var controller: MenuBarController?
+
+    init(hostLockFD: Int32) {
+        self.hostLockFD = hostLockFD
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        controller = MenuBarController(hostLockFD: hostLockFD)
     }
 }
 
@@ -550,15 +755,28 @@ if showMenuBar {
     }
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
-    let controller = MenuBarController(hostLockFD: hostLockFD)
+    let delegate = MenuBarAppDelegate(hostLockFD: hostLockFD) // NSApp.delegate is weak
+    app.delegate = delegate
     app.run()
-    withExtendedLifetime(controller) {}
+    withExtendedLifetime(delegate) {}
     exit(0)
+}
+
+// A second --settings run must not look like a dead click: hand focus to the
+// instance that already owns the panel instead of exiting silently.
+func activateExistingSettingsWindow() {
+    let selfPID = ProcessInfo.processInfo.processIdentifier
+    for peer in NSRunningApplication.runningApplications(
+        withBundleIdentifier: "com.techjuicelab.aishot")
+    where peer.processIdentifier != selfPID && !peer.isTerminated {
+        peer.activate(options: [.activateAllWindows])
+    }
 }
 
 if showSettings {
     guard acquireProcessLock("settings") != nil else {
-        log("settings are already open")
+        log("settings are already open — bringing the existing window forward")
+        activateExistingSettingsWindow()
         exit(0)
     }
     presentSettings()
@@ -839,6 +1057,7 @@ if selfTest {
     } else {
         log("target app:     Automatic")
     }
+    log("language:       \(uiLanguage.rawValue)")
     log("screen-record:  \(CGPreflightScreenCaptureAccess() ? "granted" : "NOT granted")")
     log("accessibility:  \(AXIsProcessTrusted() ? "granted" : "NOT granted")")
     if r.autoPaste, let id = r.bundleID {
@@ -853,7 +1072,8 @@ if selfTest {
 // Run with:  open -na AIShot --args --choose-dir
 if chooseDir {
     guard acquireProcessLock("settings") != nil else {
-        log("settings are already open")
+        log("settings are already open — bringing the existing window forward")
+        activateExistingSettingsWindow()
         exit(0)
     }
     let app = NSApplication.shared
@@ -862,8 +1082,9 @@ if chooseDir {
     panel.canChooseFiles = false
     panel.canChooseDirectories = true
     panel.canCreateDirectories = true
-    panel.prompt = "Use This Folder"
-    panel.message = "AIShot: choose where screenshots are saved"
+    panel.prompt = t("이 폴더 사용", "Use This Folder")
+    panel.message = t("AIShot: 스크린샷을 저장할 폴더를 고르세요",
+                      "AIShot: choose where screenshots are saved")
     panel.directoryURL = URL(fileURLWithPath: screenshotFolder())
     panel.level = .modalPanel
     app.activate()
@@ -1015,28 +1236,32 @@ guard waitUntilFinishedLaunching(dest) else {
 
 // Bring the destination forward, then focus its composer when an app-specific
 // target (currently Claude) needs help restoring the correct input field.
-guard activateDestination(dest) else {
-    copyCaptureToPasteboard()
-    log("destination did not become frontmost — skipped ⌘V; capture remains on clipboard")
-    log("saved \(savePath)")
-    exit(0)
+// Neither step is a precondition for the paste: ⌘V is delivered straight to the
+// destination's process, so a refused activation or an accessibility tree that
+// is too large to walk must not cost the user the paste — only the visual
+// hand-off. Both used to abort the run, which is why long Claude conversations
+// silently ended as clipboard-only.
+if !activateDestination(dest) {
+    log("destination did not become frontmost — sending ⌘V to it directly")
 }
-
-guard focusDestinationComposer(dest) else {
-    copyCaptureToPasteboard()
-    log("destination composer was unavailable — copied \(pasteMode) to clipboard")
-    log("saved \(savePath)")
-    exit(0)
+if !focusDestinationComposer(dest) {
+    log("could not focus the destination composer — pasting into its current focus")
 }
 
 usleep(route.app == nil ? 500_000 : 120_000) // extra time after a cold launch
-let captureChangeCount = copyCaptureToPasteboard()
+var captureChangeCount = copyCaptureToPasteboard()
 usleep(80_000) // let the pasteboard settle
 
 // A user copy or another AIShot invocation must never be mistaken for this
-// capture. A targeted event is used if focus did not move or drifted away.
+// capture. Clipboard managers, however, routinely touch the pasteboard right
+// after a write, so rewrite once and only give up if it keeps changing.
+if pb.changeCount != captureChangeCount {
+    log("clipboard changed right after the copy — rewriting the capture")
+    captureChangeCount = copyCaptureToPasteboard()
+    usleep(120_000)
+}
 guard pb.changeCount == captureChangeCount else {
-    log("clipboard changed before paste — skipped ⌘V")
+    log("clipboard kept changing — skipped ⌘V; the capture is saved and copied")
     log("saved \(savePath)")
     exit(0)
 }
