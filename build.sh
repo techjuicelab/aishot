@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 
 APP=AIShot.app
 BIN="$APP/Contents/MacOS/AIShot"
-MENUBAR_LABEL=com.techjuicelab.aishot.menubar
+MENUBAR_LABEL=space.techjuicelab.aishot.menubar
 MENUBAR_PLIST="$HOME/Library/LaunchAgents/$MENUBAR_LABEL.plist"
 
 rm -rf "$APP"
@@ -24,7 +24,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key><string>AIShot</string>
-	<key>CFBundleIdentifier</key><string>com.techjuicelab.aishot</string>
+	<key>CFBundleIdentifier</key><string>space.techjuicelab.aishot</string>
 	<key>CFBundleName</key><string>AIShot</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>1.3</string>
@@ -71,6 +71,18 @@ fi
 if [ -e "$HOME/Applications/$APP" ] && [ -z "$OLD_REQUIREMENT" ]; then
   # Never treat an unreadable installed signature as an identity match.
   OLD_REQUIREMENT="<unreadable-installed-requirement>"
+fi
+
+# Retire the pre-1.4 bundle ID. Its agent would keep restarting a host whose
+# status item macOS refuses to place in the menu bar, and both hosts would
+# fight over the same lock.
+LEGACY_LABEL=com.techjuicelab.aishot.menubar
+LEGACY_PLIST="$HOME/Library/LaunchAgents/$LEGACY_LABEL.plist"
+if [ -e "$LEGACY_PLIST" ] || launchctl print "gui/$UID/$LEGACY_LABEL" >/dev/null 2>&1; then
+  launchctl bootout "gui/$UID/$LEGACY_LABEL" >/dev/null 2>&1 || true
+  rm -f "$LEGACY_PLIST"
+  pkill -f "AIShot --menubar" >/dev/null 2>&1 || true
+  echo "cleanup:   retired the com.techjuicelab.aishot menu bar agent"
 fi
 
 # Stop the previously installed resident host only after the new build has
@@ -163,7 +175,7 @@ echo "menu bar:  running now and automatically after login"
 # can still show them enabled. Reset only on that identity transition; a stable
 # local signing certificate keeps permissions valid across later updates.
 if [ "$NEW_REQUIREMENT" != "$OLD_REQUIREMENT" ]; then
-  if tccutil reset All com.techjuicelab.aishot >/dev/null 2>&1; then
+  if tccutil reset All space.techjuicelab.aishot >/dev/null 2>&1; then
     echo "note:      signing identity changed — permissions were reset once"
   else
     echo "warning:   signing identity changed but TCC reset failed; re-add AIShot permissions manually"

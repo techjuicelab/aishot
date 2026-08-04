@@ -38,7 +38,7 @@ open -na AIShot --args --choose-dir
 ```
 
 전체 우선순위: `--out DIR` 플래그 → 앱 자체 폴더(`--choose-dir` 또는
-`defaults write com.techjuicelab.aishot saveDir ...`) → 시스템 스크린샷 폴더
+`defaults write space.techjuicelab.aishot saveDir ...`) → 시스템 스크린샷 폴더
 → `~/Desktop`(macOS 순정 기본값).
 
 AIShot은 제어와 캡처를 분리한다. 가벼운 **메뉴 막대 호스트** 하나가 목적지
@@ -99,17 +99,17 @@ Codex, Gemini 같은 프리셋을 고르거나
 open -na "$HOME/Applications/AIShot.app" --args --settings
 
 # 목적지 지정
-defaults write com.techjuicelab.aishot targetApp claude
+defaults write space.techjuicelab.aishot targetApp claude
 
 # auto | image | path
-defaults write com.techjuicelab.aishot targetPasteMode image
+defaults write space.techjuicelab.aishot targetPasteMode image
 
 # 선택: 꺼진 목적지를 실행하지 않기, 붙여넣은 뒤 원래 앱으로 돌아오기
-defaults write com.techjuicelab.aishot autoLaunchTarget -bool false
-defaults write com.techjuicelab.aishot returnFocus -bool true
+defaults write space.techjuicelab.aishot autoLaunchTarget -bool false
+defaults write space.techjuicelab.aishot returnFocus -bool true
 
 # 목적지를 Automatic으로 복원
-defaults delete com.techjuicelab.aishot targetApp
+defaults delete space.techjuicelab.aishot targetApp
 ```
 
 목적지 별칭: `claude` · `codex` · `chatgpt` · `gemini` · `antigravity` ·
@@ -138,9 +138,17 @@ cd aishot && ./build.sh   # 빌드·서명·설치 후 메뉴 막대 호스트 �
 ```
 
 `build.sh`는 AIShot을 `~/Applications`에 설치하고
-`~/Library/LaunchAgents/com.techjuicelab.aishot.menubar.plist`을 만든 뒤 메뉴
+`~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist`을 만든 뒤 메뉴
 호스트를 즉시 시작한다. 이후 로그인 때마다 호스트가 자동으로 뜨며, 실제 캡처는
 계속 별도의 일회성 프로세스로 실행된다.
+
+**기존 설치본에서 올라오는 경우**: 번들 ID가 `com.techjuicelab.aishot`에서
+`space.techjuicelab.aishot`으로 바뀌었다. macOS가 옛 ID를 붙잡아 메뉴 막대
+아이콘을 만들어놓고도 배치하지 않는 상태에 빠질 수 있고, 재부팅이나
+LaunchServices 재등록으로 풀리지 않기 때문이다. 저장된 설정은 첫 실행 때
+새 도메인으로 자동 이전되고 옛 LaunchAgent는 `build.sh`가 정리한다. 다만
+macOS에게는 새 앱이므로 **화면 기록·손쉬운 사용 권한은 한 번 다시 허용**해야
+한다.
 
 **또는** [Releases](https://github.com/techjuicelab/aishot/releases)에서
 `AIShot.app.zip`을 받아 `~/Applications`에 풀기. 공증(notarize)되지 않은 앱이라
@@ -196,7 +204,7 @@ designated requirement 덕분에 이후 재빌드에서도 화면 기록·손쉬
 해당 인증서가 없으면 애드혹 서명으로 대체되어 업데이트 후 권한을 다시 승인해야
 할 수 있다. 설치기는 새 앱과 기존 설치본의 designated requirement를 비교해,
 같으면 TCC 권한을 보존하고 서명 ID가 달라졌을 때만
-`tccutil reset All com.techjuicelab.aishot`을 실행한다. 이 경우 다음 캡처에서
+`tccutil reset All space.techjuicelab.aishot`을 실행한다. 이 경우 다음 캡처에서
 권한을 깔끔하게 다시 요청한다.
 
 ## 플래그
@@ -226,8 +234,8 @@ open -gn "$HOME/Applications/AIShot.app" --args --mode image
 # 앱의 번들 ID 확인
 osascript -e 'id of app "SomeTerm"'
 
-defaults write com.techjuicelab.aishot extraPathApps  -array-add "com.example.someterm"
-defaults write com.techjuicelab.aishot extraImageApps -array-add "com.example.chatapp"
+defaults write space.techjuicelab.aishot extraPathApps  -array-add "com.example.someterm"
+defaults write space.techjuicelab.aishot extraImageApps -array-add "com.example.chatapp"
 ```
 
 또는 [`main.swift`](main.swift) 상단의 `pathPasteIDs` / `imagePasteIDs`를
@@ -236,11 +244,11 @@ defaults write com.techjuicelab.aishot extraImageApps -array-add "com.example.ch
 ## 제거
 
 ```sh
-launchctl bootout "gui/$UID/com.techjuicelab.aishot.menubar" 2>/dev/null || true
-rm -f ~/Library/LaunchAgents/com.techjuicelab.aishot.menubar.plist
+launchctl bootout "gui/$UID/space.techjuicelab.aishot.menubar" 2>/dev/null || true
+rm -f ~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist
 rm -rf ~/Applications/AIShot.app
-tccutil reset All com.techjuicelab.aishot
-defaults delete com.techjuicelab.aishot 2>/dev/null
+tccutil reset All space.techjuicelab.aishot
+defaults delete space.techjuicelab.aishot 2>/dev/null
 # 런처/Karabiner에서 핫키 룰 제거
 ```
 

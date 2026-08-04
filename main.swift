@@ -22,11 +22,32 @@ import UniformTypeIdentifiers
 // MARK: - configuration
 
 // Extra bundle IDs can be added per machine, without rebuilding:
-//   defaults write com.techjuicelab.aishot extraPathApps  -array-add "com.example.terminal"
-//   defaults write com.techjuicelab.aishot extraImageApps -array-add "com.example.chatapp"
+//   defaults write space.techjuicelab.aishot extraPathApps  -array-add "com.example.terminal"
+//   defaults write space.techjuicelab.aishot extraImageApps -array-add "com.example.chatapp"
 func extraIDs(_ key: String) -> [String] {
-    (CFPreferencesCopyAppValue(key as CFString, "com.techjuicelab.aishot" as CFString) as? [String]) ?? []
+    (CFPreferencesCopyAppValue(key as CFString, "space.techjuicelab.aishot" as CFString) as? [String]) ?? []
 }
+
+// AIShot moved off com.techjuicelab.aishot in 1.4. macOS can wedge a bundle ID
+// so that its status item is created and reports isVisible, yet is never placed
+// in the menu bar — a state that survives a reboot, LaunchServices
+// re-registration and a ControlCenter restart. Carry the old settings over once
+// so the rename is invisible to anyone upgrading.
+func migrateLegacyPreferences() {
+    let current = "space.techjuicelab.aishot" as CFString
+    let legacy = "com.techjuicelab.aishot" as CFString
+    var carried = false
+    for key in ["saveDir", "targetApp", "targetPasteMode", "returnFocus",
+                "autoLaunchTarget", "language", "extraPathApps", "extraImageApps"] {
+        let name = key as CFString
+        guard CFPreferencesCopyAppValue(name, current) == nil,
+              let value = CFPreferencesCopyAppValue(name, legacy) else { continue }
+        CFPreferencesSetAppValue(name, value, current)
+        carried = true
+    }
+    if carried { CFPreferencesAppSynchronize(current) }
+}
+migrateLegacyPreferences()
 
 // Frontmost apps that get the *file path* pasted as text.
 let pathPasteIDs = Set([
@@ -53,11 +74,11 @@ let imagePasteIDs = Set([
 ] + extraIDs("extraImageApps"))
 // Designated target app — when set, every shot goes there regardless of which
 // app was frontmost. Configure it in the settings panel or with a bundle ID:
-//   defaults write com.techjuicelab.aishot targetApp claude
+//   defaults write space.techjuicelab.aishot targetApp claude
 // Undo with:
-//   defaults delete com.techjuicelab.aishot targetApp
+//   defaults delete space.techjuicelab.aishot targetApp
 // After pasting, focus stays in the target app; to hop back instead:
-//   defaults write com.techjuicelab.aishot returnFocus -bool true
+//   defaults write space.techjuicelab.aishot returnFocus -bool true
 struct TargetPreset {
     let alias: String
     let name: String
@@ -82,7 +103,7 @@ let targetAliases = Dictionary(uniqueKeysWithValues: targetPresets.map { ($0.ali
 
 // The menu bar and the settings panel follow the system language and can be
 // pinned per machine:
-//   defaults write com.techjuicelab.aishot language ko   # ko | en | auto
+//   defaults write space.techjuicelab.aishot language ko   # ko | en | auto
 enum UILanguage: String {
     case korean = "ko"
     case english = "en"
@@ -90,7 +111,7 @@ enum UILanguage: String {
 
 func currentUILanguage() -> UILanguage {
     if let raw = CFPreferencesCopyAppValue("language" as CFString,
-                                           "com.techjuicelab.aishot" as CFString) as? String,
+                                           "space.techjuicelab.aishot" as CFString) as? String,
        let pinned = UILanguage(rawValue: raw.lowercased()) {
         return pinned
     }
@@ -131,7 +152,7 @@ func fail(_ msg: String) -> Never {
 // O_CLOEXEC prevents screencapture and destination apps from inheriting them.
 func acquireProcessLock(_ name: String) -> Int32? {
     let path = NSTemporaryDirectory()
-        + "com.techjuicelab.aishot.\(getuid()).\(name).lock"
+        + "space.techjuicelab.aishot.\(getuid()).\(name).lock"
     let fd = Darwin.open(path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
     guard fd >= 0 else {
         log("could not open \(name) lock: \(String(cString: strerror(errno)))")
@@ -194,12 +215,12 @@ guard ["auto", "path", "image"].contains(mode) else { fail("--mode must be auto|
 // MARK: - environment
 
 // Save-location priority: --out flag → app setting (saveDir, set with
-// --choose-dir or `defaults write com.techjuicelab.aishot saveDir ...`) →
+// --choose-dir or `defaults write space.techjuicelab.aishot saveDir ...`) →
 // the system screenshot folder (com.apple.screencapture) → ~/Desktop.
 func screenshotFolder() -> String {
     if let d = outDir { return (d as NSString).expandingTildeInPath }
     if let d = CFPreferencesCopyAppValue("saveDir" as CFString,
-                                         "com.techjuicelab.aishot" as CFString) as? String,
+                                         "space.techjuicelab.aishot" as CFString) as? String,
        !d.isEmpty {
         return (d as NSString).expandingTildeInPath
     }
@@ -214,7 +235,7 @@ func screenshotFolder() -> String {
 // The explicitly pinned folder, if any. Nil means "follow the system location".
 func storedSaveDir() -> String? {
     guard let d = CFPreferencesCopyAppValue("saveDir" as CFString,
-                                            "com.techjuicelab.aishot" as CFString) as? String,
+                                            "space.techjuicelab.aishot" as CFString) as? String,
           !d.isEmpty else { return nil }
     return (d as NSString).expandingTildeInPath
 }
@@ -235,8 +256,8 @@ func systemScreenshotFolder() -> String {
 // capture (or a focus return) back into AIShot.
 let front: NSRunningApplication? = {
     let observed = NSWorkspace.shared.frontmostApplication
-    guard observed?.bundleIdentifier == "com.techjuicelab.aishot" else { return observed }
-    guard let assumed = assumeFrontRaw, assumed != "com.techjuicelab.aishot" else { return nil }
+    guard observed?.bundleIdentifier == "space.techjuicelab.aishot" else { return observed }
+    guard let assumed = assumeFrontRaw, assumed != "space.techjuicelab.aishot" else { return nil }
     return NSRunningApplication.runningApplications(withBundleIdentifier: assumed)
         .first { !$0.isTerminated }
 }()
@@ -261,19 +282,19 @@ let flagTargetID: String? = {
 }()
 let storedTargetID: String? = {
     guard let raw = CFPreferencesCopyAppValue("targetApp" as CFString,
-                                              "com.techjuicelab.aishot" as CFString) as? String,
+                                              "space.techjuicelab.aishot" as CFString) as? String,
           !raw.isEmpty else { return nil }
     return resolveTarget(raw, source: "targetApp setting")
 }()
 let storedTargetMode: String = {
     let value = (CFPreferencesCopyAppValue("targetPasteMode" as CFString,
-                                          "com.techjuicelab.aishot" as CFString) as? String) ?? "auto"
+                                          "space.techjuicelab.aishot" as CFString) as? String) ?? "auto"
     return ["auto", "path", "image"].contains(value) ? value : "auto"
 }()
 let returnFocus = (CFPreferencesCopyAppValue("returnFocus" as CFString,
-                                             "com.techjuicelab.aishot" as CFString) as? Bool) ?? false
+                                             "space.techjuicelab.aishot" as CFString) as? Bool) ?? false
 let autoLaunchTarget = (CFPreferencesCopyAppValue("autoLaunchTarget" as CFString,
-                                                  "com.techjuicelab.aishot" as CFString) as? Bool) ?? true
+                                                  "space.techjuicelab.aishot" as CFString) as? Bool) ?? true
 
 func runningApp(_ bundleID: String) -> NSRunningApplication? {
     NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
@@ -404,7 +425,7 @@ func presentSettings() {
     }
 
     let pinnedLanguage = (CFPreferencesCopyAppValue("language" as CFString,
-                                                    "com.techjuicelab.aishot" as CFString) as? String)?
+                                                    "space.techjuicelab.aishot" as CFString) as? String)?
         .lowercased()
     let languagePopup = NSPopUpButton(frame: NSRect(x: 112, y: 139, width: 250, height: 26))
     for (title, value) in [(t("시스템 언어 따름", "Follow system language"), "auto"),
@@ -491,7 +512,7 @@ func presentSettings() {
     let response = withExtendedLifetime(controller) { alert.runModal() }
     guard response == .alertFirstButtonReturn else { return }
     let selectedID = (destinationPopup.selectedItem?.representedObject as? String) ?? ""
-    let domain = "com.techjuicelab.aishot" as CFString
+    let domain = "space.techjuicelab.aishot" as CFString
     if selectedID.isEmpty {
         CFPreferencesSetAppValue("targetApp" as CFString, nil, domain)
     } else {
@@ -524,7 +545,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let destinationItem = NSMenuItem(title: "Destination", action: nil,
                                               keyEquivalent: "")
     private let hostLockFD: Int32
-    private let preferencesDomain = "com.techjuicelab.aishot" as CFString
+    private let preferencesDomain = "space.techjuicelab.aishot" as CFString
 
     // The app in front before the status menu opened. Clicking a status item
     // can make AIShot itself frontmost, which would strand an Automatic
@@ -537,7 +558,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
 
-        statusItem.autosaveName = "com.techjuicelab.aishot.status"
+        statusItem.autosaveName = "space.techjuicelab.aishot.status"
         statusItem.isVisible = true
 
         if let button = statusItem.button {
@@ -549,7 +570,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
 
         let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        if let front, front != "com.techjuicelab.aishot" { lastExternalFront = front }
+        if let front, front != "space.techjuicelab.aishot" { lastExternalFront = front }
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(applicationActivated(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
@@ -612,7 +633,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func applicationActivated(_ note: Notification) {
         guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
               let bundleID = app.bundleIdentifier,
-              bundleID != "com.techjuicelab.aishot" else { return }
+              bundleID != "space.techjuicelab.aishot" else { return }
         lastExternalFront = bundleID
     }
 
@@ -767,7 +788,7 @@ if showMenuBar {
 func activateExistingSettingsWindow() {
     let selfPID = ProcessInfo.processInfo.processIdentifier
     for peer in NSRunningApplication.runningApplications(
-        withBundleIdentifier: "com.techjuicelab.aishot")
+        withBundleIdentifier: "space.techjuicelab.aishot")
     where peer.processIdentifier != selfPID && !peer.isTerminated {
         peer.activate(options: [.activateAllWindows])
     }
@@ -1090,8 +1111,8 @@ if chooseDir {
     app.activate()
     if panel.runModal() == .OK, let url = panel.url {
         CFPreferencesSetAppValue("saveDir" as CFString, url.path as CFString,
-                                 "com.techjuicelab.aishot" as CFString)
-        CFPreferencesAppSynchronize("com.techjuicelab.aishot" as CFString)
+                                 "space.techjuicelab.aishot" as CFString)
+        CFPreferencesAppSynchronize("space.techjuicelab.aishot" as CFString)
         log("save folder set: \(url.path)")
     } else {
         log("save folder unchanged: \(screenshotFolder())")
