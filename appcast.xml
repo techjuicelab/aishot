@@ -1,0 +1,15 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>AIShot</title>
+        <item>
+            <title>1.4</title>
+            <pubDate>Thu, 06 Aug 2026 01:24:07 +0900</pubDate>
+            <link>https://github.com/techjuicelab/aishot</link>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>1.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/techjuicelab/aishot/releases/download/v1.4/AIShot-1.4.zip" length="3221435" type="application/octet-stream" sparkle:edSignature="UfxrlI9pPX9OTh0GVoTspoFiagrto8GdKqINm7gWFAFb1VBivsQfeIum3OYaGdx6FyKQDkNRJw5D81lxwlLADQ=="/>
+        </item>
+    </channel>
+</rss>
