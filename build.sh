@@ -1,6 +1,7 @@
 #!/bin/zsh
 # Build AIShot.app (universal, locally signed, no dependencies) and install it
-# to ~/Applications so launchers can start it by name: open -gna AIShot
+# into /Applications, like any other Mac app, so launchers can start it by
+# name: open -gna AIShot
 set -e
 cd "$(dirname "$0")"
 
@@ -8,6 +9,21 @@ APP=AIShot.app
 BIN="$APP/Contents/MacOS/AIShot"
 MENUBAR_LABEL=space.techjuicelab.aishot.menubar
 MENUBAR_PLIST="$HOME/Library/LaunchAgents/$MENUBAR_LABEL.plist"
+
+# /Applications is the expected home for an app and is group-writable for
+# admin users, so no sudo is needed on a normal Mac. Fall back to ~/Applications
+# on a managed machine where it is locked down. Override with:
+#   AISHOT_INSTALL_DIR=~/Applications ./build.sh
+INSTALL_DIR="${AISHOT_INSTALL_DIR:-}"
+if [ -z "$INSTALL_DIR" ]; then
+  if [ -w /Applications ]; then
+    INSTALL_DIR=/Applications
+  else
+    INSTALL_DIR="$HOME/Applications"
+  fi
+fi
+INSTALL_DIR="${INSTALL_DIR%/}"
+INSTALLED="$INSTALL_DIR/$APP"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
@@ -61,14 +77,14 @@ else
   echo "signing:   ad-hoc (permissions may need reapproval after updates)"
 fi
 
-# Install to ~/Applications and register with LaunchServices
+# Install and register with LaunchServices
 NEW_REQUIREMENT=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^.*designated => //p')
-OLD_REQUIREMENT=$(codesign -d -r- "$HOME/Applications/$APP" 2>&1 | sed -n 's/^.*designated => //p')
+OLD_REQUIREMENT=$(codesign -d -r- "$INSTALLED" 2>&1 | sed -n 's/^.*designated => //p')
 if [ -z "$NEW_REQUIREMENT" ]; then
   echo "error:     could not read the new app's signing requirement"
   exit 1
 fi
-if [ -e "$HOME/Applications/$APP" ] && [ -z "$OLD_REQUIREMENT" ]; then
+if [ -e "$INSTALLED" ] && [ -z "$OLD_REQUIREMENT" ]; then
   # Never treat an unreadable installed signature as an identity match.
   OLD_REQUIREMENT="<unreadable-installed-requirement>"
 fi
@@ -97,9 +113,9 @@ if launchctl print "gui/$UID/$MENUBAR_LABEL" >/dev/null 2>&1; then
   exit 1
 fi
 
-OLD_MENUBAR_COMMAND="$HOME/Applications/$APP/Contents/MacOS/AIShot --menubar"
+# Any host still running from a previous install — at either location.
 while read -r process_pid process_command; do
-  if [ "$process_command" = "$OLD_MENUBAR_COMMAND" ]; then
+  if [[ "$process_command" == *"/$APP/Contents/MacOS/AIShot --menubar" ]]; then
     kill "$process_pid" >/dev/null 2>&1 || true
     for _ in {1..20}; do
       kill -0 "$process_pid" >/dev/null 2>&1 || break
@@ -112,16 +128,24 @@ while read -r process_pid process_command; do
   fi
 done < <(ps ax -o pid=,command=)
 
-mkdir -p "$HOME/Applications"
-rm -rf "$HOME/Applications/$APP"
-ditto "$APP" "$HOME/Applications/$APP"
+mkdir -p "$INSTALL_DIR"
+rm -rf "$INSTALLED"
+ditto "$APP" "$INSTALLED"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-[ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$HOME/Applications/$APP" || true
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$INSTALLED" || true
 
-# Keep exactly one registered copy: unregister and remove the build-tree
-# bundle so `open -a AIShot` (and TCC identity) can never resolve ambiguously.
+# Keep exactly one registered copy: two bundles sharing a bundle ID make
+# `open -a AIShot`, the TCC identity and the menu bar item resolve ambiguously.
+# Drop the build-tree bundle and any copy left at the other install location.
 [ -x "$LSREGISTER" ] && "$LSREGISTER" -f -u "$PWD/$APP" || true
 rm -rf "$APP"
+for other in /Applications "$HOME/Applications"; do
+  [ "$other" = "$INSTALL_DIR" ] && continue
+  [ -e "$other/$APP" ] || continue
+  [ -x "$LSREGISTER" ] && "$LSREGISTER" -f -u "$other/$APP" || true
+  rm -rf "$other/$APP"
+  echo "cleanup:   removed the earlier install at $other/$APP"
+done
 
 # Keep a single lightweight menu-bar host available after login. The host only
 # owns the status item; each capture still runs as a short-lived app instance.
@@ -134,14 +158,13 @@ cat > "$MENUBAR_PLIST" <<PLIST
   <key>Label</key><string>$MENUBAR_LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$HOME/Applications/$APP/Contents/MacOS/AIShot</string>
+    <string>$INSTALLED/Contents/MacOS/AIShot</string>
     <string>--menubar</string>
   </array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key><false/>
-  </dict>
+  <!-- Restart on any exit: a host that dies for any reason must not leave the
+       user without a menu bar item. Quit AIShot unloads this agent instead. -->
+  <key>KeepAlive</key><true/>
   <key>LimitLoadToSessionType</key><string>Aqua</string>
   <key>ProcessType</key><string>Interactive</string>
 </dict>
@@ -167,9 +190,12 @@ if [ "$MENUBAR_RUNNING" -ne 1 ]; then
   exit 1
 fi
 
-echo "installed: $HOME/Applications/$APP"
-echo "launch:    open -gn \"\$HOME/Applications/$APP\""
+echo "installed: $INSTALLED"
+echo "launch:    open -gn \"$INSTALLED\""
 echo "menu bar:  running now and automatically after login"
+if [ "$INSTALL_DIR" != "/Applications" ]; then
+  echo "note:      /Applications was not writable — installed to $INSTALL_DIR instead"
+fi
 
 # A changed designated requirement invalidates TCC grants while System Settings
 # can still show them enabled. Reset only on that identity transition; a stable

@@ -747,7 +747,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         launchSibling(arguments: ["--choose-dir"], activates: true)
     }
 
+    // The LaunchAgent now restarts the host on *any* exit, so that a crash or a
+    // stray termination cannot silently leave the user without a menu bar item.
+    // An explicit Quit therefore has to unload the agent for this login session;
+    // the plist stays in place and returns at the next login.
     @objc private func quit(_ sender: Any?) {
+        let launchctl = Process()
+        launchctl.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        launchctl.arguments = ["bootout", "gui/\(getuid())/space.techjuicelab.aishot.menubar"]
+        do {
+            try launchctl.run()
+            launchctl.waitUntilExit()
+        } catch {
+            log("could not unload the menu bar agent: \(error)")
+        }
         NSApp.terminate(nil)
     }
 }
