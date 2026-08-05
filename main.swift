@@ -720,23 +720,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(updateItem)
         #endif
 
-        // ContinuityCapture and TextShot are hotkey-launched capture tools that
-        // live for a few seconds and own no menu bar or window, so this menu is
-        // the one persistent TechJuice surface where their update checks can
-        // live. Each entry launches the sibling app's own --check-updates mode:
-        // the check runs against that app's feed with that app's Sparkle UI —
-        // AIShot only provides the button. Not guarded by canImport(Sparkle);
-        // launching another app needs nothing from the framework.
-        let siblingItems = siblingUpdateMenuItems()
-        if !siblingItems.isEmpty {
-            let othersItem = NSMenuItem(title: t("다른 앱 업데이트 확인", "Check Other Apps for Updates"),
-                                        action: nil, keyEquivalent: "")
-            let submenu = NSMenu(title: "Other App Updates")
-            siblingItems.forEach { submenu.addItem($0) }
-            othersItem.submenu = submenu
-            menu.addItem(othersItem)
-        }
-
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: t("AIShot 종료", "Quit AIShot"),
@@ -874,42 +857,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
     #endif
 
-    // The UI-less TechJuice capture tools, shown only when actually installed.
-    // Deliberately limited to apps with no update surface of their own —
-    // Screenshot Renamer and HomeSounds Sync carry their own buttons.
-    private static let uilessSiblings: [(bundleID: String, korean: String, english: String)] = [
-        ("com.techjuicelab.continuitycapture", "ContinuityCapture", "ContinuityCapture"),
-        ("com.techjuicelab.textshot", "TextShot", "TextShot"),
-    ]
-
-    private func siblingUpdateMenuItems() -> [NSMenuItem] {
-        Self.uilessSiblings.compactMap { sibling in
-            guard NSWorkspace.shared.urlForApplication(
-                withBundleIdentifier: sibling.bundleID) != nil else { return nil }
-            let item = NSMenuItem(title: t(sibling.korean, sibling.english),
-                                  action: #selector(checkSiblingForUpdates(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.representedObject = sibling.bundleID
-            return item
-        }
-    }
-
-    @objc private func checkSiblingForUpdates(_ sender: NSMenuItem) {
-        guard let bundleID = sender.representedObject as? String,
-              let url = NSWorkspace.shared.urlForApplication(
-                  withBundleIdentifier: bundleID) else { return }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.arguments = ["--check-updates"]
-        // The sibling runs its own Sparkle session and shows its own alert or
-        // progress window; activate it so that UI comes up in front.
-        configuration.activates = true
-        configuration.addsToRecentItems = false
-        configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
-            if let error { log("could not start update check for \(bundleID): \(error)") }
-        }
-    }
 
     // The LaunchAgent (KeepAlive SuccessfulExit=false) restarts the host after
     // a crash but not after a clean exit — restart-on-any-exit would race
