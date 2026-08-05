@@ -34,7 +34,7 @@
 선택창을 한 번 실행하면 된다:
 
 ```sh
-open -na AIShot --args --choose-dir
+open -nb space.techjuicelab.aishot --args --choose-dir
 ```
 
 전체 우선순위: `--out DIR` 플래그 → 앱 자체 폴더(`--choose-dir` 또는
@@ -63,7 +63,7 @@ AIShot은 제어와 캡처를 분리한다. 가벼운 **메뉴 막대 호스트*
 메뉴 아이콘이 보이지 않으면 단일 호스트를 직접 시작할 수 있다:
 
 ```sh
-open -gn "$HOME/Applications/AIShot.app" --args --menubar
+open -gnb space.techjuicelab.aishot --args --menubar
 ```
 
 ## 지정 앱 — 어디서 찍든 한 곳으로
@@ -96,7 +96,7 @@ Codex, Gemini 같은 프리셋을 고르거나
 
 ```sh
 # 메뉴 없이 같은 설정창 열기
-open -na "$HOME/Applications/AIShot.app" --args --settings
+open -nb space.techjuicelab.aishot --args --settings
 
 # 목적지 지정
 defaults write space.techjuicelab.aishot targetApp claude
@@ -121,7 +121,7 @@ defaults delete space.techjuicelab.aishot targetApp
 `--target`은 이번 실행에만 적용되고 저장된 목적지보다 우선한다:
 
 ```sh
-open -gn "$HOME/Applications/AIShot.app" --args --target codex
+open -gnb space.techjuicelab.aishot --args --target codex
 ```
 
 현재 설정으로 어떻게 동작할지는 `--self-test`로 미리 확인할 수 있다.
@@ -137,10 +137,15 @@ git clone https://github.com/techjuicelab/aishot.git
 cd aishot && ./build.sh   # 빌드·서명·설치 후 메뉴 막대 호스트 시작
 ```
 
-`build.sh`는 AIShot을 `~/Applications`에 설치하고
+`build.sh`는 AIShot을 다른 앱과 마찬가지로 `/Applications`에 설치하고
 `~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist`을 만든 뒤 메뉴
 호스트를 즉시 시작한다. 이후 로그인 때마다 호스트가 자동으로 뜨며, 실제 캡처는
-계속 별도의 일회성 프로세스로 실행된다.
+계속 별도의 일회성 프로세스로 실행된다. `/Applications`는 관리자 계정에 쓰기
+권한이 있어 sudo가 필요 없다. 잠긴 관리형 Mac이면 자동으로 `~/Applications`로
+물러나며, 설치 위치는 `AISHOT_INSTALL_DIR=~/Applications ./build.sh`로 지정할
+수도 있다. 어느 쪽이든 다른 위치에 남은 이전 설치본은 자동으로 제거된다 —
+같은 번들 ID의 앱이 두 곳에 있으면 `open -a`, TCC 신원, 메뉴 막대 항목이
+모두 모호해진다.
 
 **기존 설치본에서 올라오는 경우**: 번들 ID가 `com.techjuicelab.aishot`에서
 `space.techjuicelab.aishot`으로 바뀌었다. macOS가 옛 ID를 붙잡아 메뉴 막대
@@ -151,11 +156,11 @@ macOS에게는 새 앱이므로 **화면 기록·손쉬운 사용 권한은 한 
 한다.
 
 **또는** [Releases](https://github.com/techjuicelab/aishot/releases)에서
-`AIShot.app.zip`을 받아 `~/Applications`에 풀기. 공증(notarize)되지 않은 앱이라
+`AIShot.app.zip`을 받아 `/Applications`에 풀기. 공증(notarize)되지 않은 앱이라
 다운로드에 격리 플래그가 붙는다 — 아래 명령으로 제거하거나
 
 ```sh
-xattr -dr com.apple.quarantine ~/Applications/AIShot.app
+xattr -dr com.apple.quarantine /Applications/AIShot.app
 ```
 
 한 번 실행한 뒤 시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"로 승인
@@ -168,7 +173,7 @@ xattr -dr com.apple.quarantine ~/Applications/AIShot.app
 쓰고 있는 런처 아무거나 아래 명령에 연결:
 
 ```sh
-open -gn "$HOME/Applications/AIShot.app" --args --capture
+open -gnb space.techjuicelab.aishot --args --capture
 ```
 
 인자 없이 실행해도 같은 일회성 캡처이므로 기존 런처와 Karabiner 룰은 그대로
@@ -210,7 +215,7 @@ designated requirement 덕분에 이후 재빌드에서도 화면 기록·손쉬
 ## 플래그
 
 ```sh
-open -gn "$HOME/Applications/AIShot.app" --args --mode image
+open -gnb space.techjuicelab.aishot --args --mode image
 ```
 
 | 플래그 | 설명 | 기본값 |
@@ -246,7 +251,7 @@ defaults write space.techjuicelab.aishot extraImageApps -array-add "com.example.
 ```sh
 launchctl bootout "gui/$UID/space.techjuicelab.aishot.menubar" 2>/dev/null || true
 rm -f ~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist
-rm -rf ~/Applications/AIShot.app
+rm -rf /Applications/AIShot.app
 tccutil reset All space.techjuicelab.aishot
 defaults delete space.techjuicelab.aishot 2>/dev/null
 # 런처/Karabiner에서 핫키 룰 제거

@@ -36,7 +36,7 @@ AIShot captures in a *different* folder than regular screenshots — run the
 built-in folder chooser once:
 
 ```sh
-open -na AIShot --args --choose-dir
+open -nb space.techjuicelab.aishot --args --choose-dir
 ```
 
 Full resolution order: `--out DIR` flag → the app's own folder (set by
@@ -67,7 +67,7 @@ for:
 If the menu icon is not running, start the singleton host manually:
 
 ```sh
-open -gn "$HOME/Applications/AIShot.app" --args --menubar
+open -gnb space.techjuicelab.aishot --args --menubar
 ```
 
 ## Destination app — every shot lands in one place
@@ -100,7 +100,7 @@ the settings panel and the same values remain available from the CLI:
 
 ```sh
 # open the same settings panel without the menu
-open -na "$HOME/Applications/AIShot.app" --args --settings
+open -nb space.techjuicelab.aishot --args --settings
 
 # select a destination
 defaults write space.techjuicelab.aishot targetApp claude
@@ -125,7 +125,7 @@ You can also bind a hotkey that sends that run to one specific app regardless
 of focus. `--target` beats the stored destination for that run:
 
 ```sh
-open -gn "$HOME/Applications/AIShot.app" --args --target codex
+open -gnb space.techjuicelab.aishot --args --target codex
 ```
 
 Preview what your current setup would do with `--self-test`.
@@ -142,10 +142,15 @@ git clone https://github.com/techjuicelab/aishot.git
 cd aishot && ./build.sh   # builds, signs, installs, and starts the menu bar host
 ```
 
-The build installs AIShot to `~/Applications`, writes
+The build installs AIShot into `/Applications` like any other Mac app, writes
 `~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist`, and starts the
 menu host immediately. The host starts automatically on later logins; captures
-remain separate one-shot processes.
+remain separate one-shot processes. `/Applications` is group-writable for admin
+users, so no sudo is involved; on a managed Mac where it is locked down the
+build falls back to `~/Applications`, and the location can be set explicitly
+with `AISHOT_INSTALL_DIR=~/Applications ./build.sh`. Either way, a copy left at
+the other location is removed — two bundles sharing a bundle ID make `open -a`,
+the TCC identity and the menu bar item resolve ambiguously.
 
 **Upgrading from an earlier install**: the bundle ID changed from
 `com.techjuicelab.aishot` to `space.techjuicelab.aishot`. macOS can wedge a
@@ -157,11 +162,11 @@ have to be granted once more**.
 
 **Or download** `AIShot.app.zip` from
 [Releases](https://github.com/techjuicelab/aishot/releases) and unzip into
-`~/Applications`. The app is not notarized, so macOS quarantines the
+`/Applications`. The app is not notarized, so macOS quarantines the
 download — clear it with
 
 ```sh
-xattr -dr com.apple.quarantine ~/Applications/AIShot.app
+xattr -dr com.apple.quarantine /Applications/AIShot.app
 ```
 
 or launch it once and approve it under System Settings → Privacy & Security
@@ -174,7 +179,7 @@ host for the current session with `--menubar` as shown above.
 Bind any launcher you already use to:
 
 ```sh
-open -gn "$HOME/Applications/AIShot.app" --args --capture
+open -gnb space.techjuicelab.aishot --args --capture
 ```
 
 No arguments still means the same one-shot capture, so existing launcher and
@@ -218,7 +223,7 @@ when the signing identity changed so the next capture re-prompts cleanly.
 ## Flags
 
 ```sh
-open -gn "$HOME/Applications/AIShot.app" --args --mode image
+open -gnb space.techjuicelab.aishot --args --mode image
 ```
 
 | Flag | Description | Default |
@@ -255,7 +260,7 @@ Or edit `pathPasteIDs` / `imagePasteIDs` at the top of
 ```sh
 launchctl bootout "gui/$UID/space.techjuicelab.aishot.menubar" 2>/dev/null || true
 rm -f ~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist
-rm -rf ~/Applications/AIShot.app
+rm -rf /Applications/AIShot.app
 tccutil reset All space.techjuicelab.aishot
 defaults delete space.techjuicelab.aishot 2>/dev/null
 # and remove the hotkey rule from your launcher / Karabiner
