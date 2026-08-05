@@ -1,3 +1,17 @@
 .DS_Store
 AIShot.app/
 *.zip
+
+# 자격증명 — 이 저장소는 공개다. Sparkle 자동 업데이트 도입으로 EdDSA 개인키가
+# 배포 체인의 신뢰 앵커가 되었고, 그 키 하나가 TechJuice Mac 앱 전부를 서명한다.
+# 실수로 커밋되면 되돌릴 수 없다.
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.der
+*_priv*
+.env
+.env.*
+credentials*

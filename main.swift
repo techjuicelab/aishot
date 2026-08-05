@@ -19,6 +19,13 @@ import ApplicationServices
 import Darwin
 import UniformTypeIdentifiers
 
+// Sparkle is embedded by build.sh. Guarded so that a build without it — no
+// network on a first build, or an explicitly stripped-down one — still
+// compiles, just without update checking.
+#if canImport(Sparkle)
+import Sparkle
+#endif
+
 // MARK: - configuration
 
 // Extra bundle IDs can be added per machine, without rebuilding:
@@ -211,6 +218,60 @@ while let arg = argIt.next() {
     }
 }
 guard ["auto", "path", "image"].contains(mode) else { fail("--mode must be auto|path|image") }
+
+// MARK: - updater relaunch
+
+// Sparkle installs an update by replacing the bundle and then relaunching the
+// app with no arguments at all. Nothing in that relaunch says "you were the menu
+// bar host", so without a hint the new process takes the default path — a
+// one-shot capture — and a finished update throws a capture crosshair over
+// whatever the user was doing while the menu bar item stays gone until the next
+// login (the LaunchAgent restarts the host only after an *unsuccessful* exit).
+//
+// The updater delegate therefore leaves a marker just before the relaunch. It
+// goes in the preferences domain rather than anywhere inside the bundle,
+// because the bundle is the thing about to be swapped out.
+let relaunchMarkerDomain = "space.techjuicelab.aishot" as CFString
+let relaunchMarkerKey = "menuBarRelaunchAt" as CFString
+// One marker, one relaunch, and only for a couple of minutes. A marker that
+// outlived its update would quietly turn every later hotkey capture into a
+// second menu bar host — a worse failure than the one this fixes — so the
+// timestamp, not just the presence of the key, is what makes it valid.
+let relaunchMarkerWindow: TimeInterval = 180
+
+func markMenuBarRelaunch() {
+    CFPreferencesSetAppValue(relaunchMarkerKey,
+                             NSNumber(value: Date().timeIntervalSince1970),
+                             relaunchMarkerDomain)
+    CFPreferencesAppSynchronize(relaunchMarkerDomain)
+}
+
+// Consumes the marker. It is removed whether or not it was still fresh, so a
+// stale one cannot linger and be honoured by some later run.
+func claimMenuBarRelaunchMarker() -> Bool {
+    CFPreferencesAppSynchronize(relaunchMarkerDomain)
+    guard let stamp = CFPreferencesCopyAppValue(relaunchMarkerKey,
+                                                relaunchMarkerDomain) as? Double else {
+        return false
+    }
+    CFPreferencesSetAppValue(relaunchMarkerKey, nil, relaunchMarkerDomain)
+    CFPreferencesAppSynchronize(relaunchMarkerDomain)
+    let age = Date().timeIntervalSince1970 - stamp
+    guard age >= 0, age <= relaunchMarkerWindow else {
+        log("discarded a stale menu bar relaunch marker (\(Int(age))s old)")
+        return false
+    }
+    return true
+}
+
+// Only a run shaped exactly like Sparkle's relaunch — no arguments whatsoever —
+// may claim the marker. Anything explicit (--capture, --settings, --choose-dir)
+// stays what it was asked to be, and a hotkey capture with no marker present
+// behaves exactly as it always has.
+if !showMenuBar, CommandLine.arguments.count == 1, claimMenuBarRelaunchMarker() {
+    showMenuBar = true
+    log("relaunched by the updater — starting the menu bar host, not a capture")
+}
 
 // MARK: - environment
 
@@ -539,6 +600,19 @@ func presentSettings() {
 
 // MARK: - menu bar
 
+#if canImport(Sparkle)
+// Writes the marker the relaunched process looks for. This callback is the last
+// moment at which the host still knows it is a host: it runs while the old
+// process is alive and before the installer swaps the bundle, so anything
+// recorded here survives into the new copy.
+final class UpdaterRelaunchMarker: NSObject, SPUUpdaterDelegate {
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        markMenuBarRelaunch()
+        log("update installed — the relaunch will come back as the menu bar host")
+    }
+}
+#endif
+
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
@@ -546,6 +620,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                                               keyEquivalent: "")
     private let hostLockFD: Int32
     private let preferencesDomain = "space.techjuicelab.aishot" as CFString
+
+    #if canImport(Sparkle)
+    // The menu bar host is the only long-lived AIShot process — capture workers
+    // exit within seconds of doing their job — so it is the one that owns update
+    // checking. Started in init rather than lazily: the scheduled background
+    // check only runs while the updater is alive.
+    private let updaterController: SPUStandardUpdaterController
+    // SPUStandardUpdaterController references its updaterDelegate weakly (the
+    // header says so outright), so the controller alone would let this go away
+    // immediately and the relaunch would never be marked. Held strongly here for
+    // the life of the host.
+    private let updaterDelegate: UpdaterRelaunchMarker
+    #endif
 
     // The app in front before the status menu opened. Clicking a status item
     // can make AIShot itself frontmost, which would strand an Automatic
@@ -556,6 +643,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     init(hostLockFD: Int32) {
         self.hostLockFD = hostLockFD
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        #if canImport(Sparkle)
+        let relaunchMarker = UpdaterRelaunchMarker()
+        self.updaterDelegate = relaunchMarker
+        self.updaterController = SPUStandardUpdaterController(
+            startingUpdater: true, updaterDelegate: relaunchMarker, userDriverDelegate: nil)
+        #endif
         super.init()
 
         statusItem.autosaveName = "space.techjuicelab.aishot.status"
@@ -619,6 +712,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                                           keyEquivalent: "")
         changeFolderItem.target = self
         menu.addItem(changeFolderItem)
+
+        #if canImport(Sparkle)
+        let updateItem = NSMenuItem(title: t("업데이트 확인…", "Check for Updates…"),
+                                    action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
+        #endif
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: t("AIShot 종료", "Quit AIShot"),
@@ -747,10 +848,22 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         launchSibling(arguments: ["--choose-dir"], activates: true)
     }
 
-    // The LaunchAgent now restarts the host on *any* exit, so that a crash or a
-    // stray termination cannot silently leave the user without a menu bar item.
-    // An explicit Quit therefore has to unload the agent for this login session;
-    // the plist stays in place and returns at the next login.
+    #if canImport(Sparkle)
+    // AIShot is an accessory app, so Sparkle's progress and release-notes
+    // windows would otherwise open behind whatever the user is working in.
+    @objc private func checkForUpdates(_ sender: Any?) {
+        NSApp.activate(ignoringOtherApps: true)
+        updaterController.checkForUpdates(sender)
+    }
+    #endif
+
+    // The LaunchAgent (KeepAlive SuccessfulExit=false) restarts the host after
+    // a crash but not after a clean exit — restart-on-any-exit would race
+    // launchd against Sparkle's installer over a bundle mid-replacement.
+    // Terminating here is a clean exit, so launchd would already let it stick;
+    // unload the agent as well so Quit means "gone for this session" no matter
+    // how the exit is classified. The plist stays in place and the host
+    // returns at the next login.
     @objc private func quit(_ sender: Any?) {
         let launchctl = Process()
         launchctl.executableURL = URL(fileURLWithPath: "/bin/launchctl")

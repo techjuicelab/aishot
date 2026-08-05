@@ -174,6 +174,28 @@ or launch it once and approve it under System Settings → Privacy & Security
 Downloaded app bundles do not run `build.sh`; after approval, start their menu
 host for the current session with `--menubar` as shown above.
 
+## Automatic updates
+
+From 1.4 AIShot updates itself through [Sparkle](https://sparkle-project.org).
+The menu bar host checks once a day and offers the update when there is one; to
+check on demand, use **Check for Updates…** in the menu bar.
+
+A download is installed only after its EdDSA signature verifies, so a
+compromised distribution path cannot get arbitrary code installed. The public
+key used for that check ships inside the app bundle.
+
+**If you had been building from source**, the first automatic update switches
+the signing identity from your local ad-hoc signature to the distribution
+certificate. macOS ties permissions to that identity, so you will have to grant
+**Screen Recording and Accessibility once more**. The certificate is stable
+afterwards, so later updates will not ask again.
+
+To opt out:
+
+```sh
+defaults write space.techjuicelab.aishot SUEnableAutomaticChecks -bool false
+```
+
 ## Hotkey
 
 Bind any launcher you already use to:
