@@ -3,6 +3,15 @@
     <channel>
         <title>AIShot</title>
         <item>
+            <title>1.5</title>
+            <pubDate>Thu, 06 Aug 2026 01:51:00 +0900</pubDate>
+            <link>https://github.com/techjuicelab/aishot</link>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>1.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/techjuicelab/aishot/releases/download/v1.5/AIShot-1.5.zip" length="3225422" type="application/octet-stream" sparkle:edSignature="k/LIDqrlouHMMVqH1JZhhQIzftou9Gn5R2vFgJFhoDD5XoXdekdYeWPA7PaLSPlI03gAUti/6yo3LUwJLVHEBg=="/>
+        </item>
+        <item>
             <title>1.4</title>
             <pubDate>Thu, 06 Aug 2026 01:24:07 +0900</pubDate>
             <link>https://github.com/techjuicelab/aishot</link>
