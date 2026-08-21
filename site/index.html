@@ -354,7 +354,7 @@
         </ul>
 
         <div class="actions" data-reveal>
-          <a class="btn btn-primary" href="https://github.com/techjuicelab/aishot" target="_blank" rel="noopener" data-i18n="ctaPrimary">Get it on GitHub</a>
+          <a class="btn btn-primary" href="https://github.com/techjuicelab/aishot/releases/latest/download/AIShot.dmg" data-i18n="ctaPrimary">Download AIShot.dmg</a>
           <a class="btn btn-ghost" href="#how" data-i18n="ctaGhost">See how routing works ↓</a>
         </div>
       </div>
@@ -450,19 +450,20 @@
   </div></section>
 
   <section class="reveal" id="install"><div class="wrap">
-    <p class="kicker" data-i18n="s6k">run it yourself</p>
-    <h2 data-i18n="s6h">Clone, build, pick a destination, capture.</h2>
-    <p class="req" data-i18n="s6p">You'll need macOS 14+ and Xcode Command Line Tools. <code>build.sh</code> uses the stable local signing certificate when available (ad-hoc fallback), installs to <code>~/Applications</code>, and starts the menu host now and after login. Choose a destination from the new menu; Karabiner also ships <kbd>⌘⇧2</kbd> for one-shot capture.</p>
-    <div class="code"><span class="c" data-i18n="codeComment"># get the code and build</span>
-<span class="pmt">$</span> git clone https://github.com/techjuicelab/aishot.git
-<span class="pmt">$</span> cd aishot &amp;&amp; ./build.sh
+    <p class="kicker" data-i18n="s6k">install it</p>
+    <h2 data-i18n="s6h">Download, drag, open once.</h2>
+    <p class="req" data-i18n="s6p">macOS 14+. Drag <code>AIShot.app</code> into <code>/Applications</code> and open it once — it installs its own menu bar agent and comes back at every login. It is not notarized, so the first launch needs a one-time "Open Anyway" under Privacy &amp; Security, or clear the quarantine flag first. Prefer to build it yourself? That needs Xcode Command Line Tools and ends in exactly the same place. Karabiner also ships <kbd>⌘⇧2</kbd> for one-shot capture.</p>
+    <div class="code"><span class="c" data-i18n="codeComment"># after dragging AIShot.app into /Applications</span>
+<span class="pmt">$</span> xattr -dr com.apple.quarantine /Applications/AIShot.app
+<span class="pmt">$</span> open /Applications/AIShot.app
 
 <span class="c" data-i18n="codeCommentMenu"># the menu host is running now and returns after login</span>
-<span class="c" data-i18n="codeComment2"># capture directly or bind a hotkey to this command</span>
-<span class="pmt">$</span> open -gn "$HOME/Applications/AIShot.app" --args --capture</div>
+<span class="c" data-i18n="codeComment2"># or build from source — same installer, same result</span>
+<span class="pmt">$</span> git clone https://github.com/techjuicelab/aishot.git
+<span class="pmt">$</span> cd aishot &amp;&amp; ./build.sh</div>
     <div class="actions">
-      <a class="btn btn-primary" href="https://github.com/techjuicelab/aishot" target="_blank" rel="noopener" data-i18n="ctaPrimary2">Get it on GitHub</a>
-      <a class="btn btn-ghost" href="https://github.com/techjuicelab/aishot/releases" target="_blank" rel="noopener" data-i18n="ctaReleases">Releases ↗</a>
+      <a class="btn btn-primary" href="https://github.com/techjuicelab/aishot/releases/latest/download/AIShot.dmg" data-i18n="ctaPrimary2">Download AIShot.dmg</a>
+      <a class="btn btn-ghost" href="https://github.com/techjuicelab/aishot" target="_blank" rel="noopener" data-i18n="ctaSource">Source on GitHub ↗</a>
     </div>
   </div></section>
 </main>
@@ -487,7 +488,8 @@
     fact1:'<span class="k">$ 목적지</span><span>무엇이 최전면이든 선택한 앱이 모든 캡처를 받습니다.</span>',
     fact2:'<span class="k">$ 붙여넣기</span><span>자동, PNG 이미지, 파일 경로 — 목적지가 받을 형식을 고릅니다.</span>',
     fact3:'<span class="k">$ 메뉴 막대</span><span>캡처, 목적지 전환, 설정·스크린샷 폴더 열기, 종료까지.</span>',
-    ctaPrimary:"GitHub에서 받기", ctaPrimary2:"GitHub에서 받기", ctaGhost:"라우팅 방식 보기 ↓",
+    ctaPrimary:"AIShot.dmg 내려받기", ctaPrimary2:"AIShot.dmg 내려받기", ctaGhost:"라우팅 방식 보기 ↓",
+    ctaSource:"GitHub 소스 ↗",
     ctaReleases:"릴리스 ↗",
     marqueeTag:"영역 선택",
     marqueeText:'<b>단축키</b> → 영역 드래그 → 놓기. <span class="dim">Space = 창 · Esc = 취소 · 눈 깜짝할 새 클립보드로.</span>',
@@ -516,11 +518,11 @@
     s5k:"솔직하게", s5h:"솔직한 도구가 더 오래갑니다.",
     s5p:"MIT 라이선스에 전체 소스가 GitHub에 공개돼 있습니다. 아쉬운 점도 먼저 말씀드릴게요:",
     s5list:'<li>공증되지 않아 다운로드 빌드는 개인정보 보호 및 보안에서 "그래도 열기"를 한 번 눌러야 합니다.</li><li>일회성 권한 두 개 — 화면 기록, 그다음 자동 ⌘V용 손쉬운 사용. 손쉬운 사용을 허용하기 전에는 클립보드 복사까지만 됩니다.</li><li>지정 목적지를 실행하거나 활성화하지 못하면 ⌘V를 보내지 않고 캡처를 클립보드에 남깁니다.</li><li>소스 빌드는 <code>TechJuice Local Code Signing</code> 인증서가 있으면 자동 사용합니다. 설치기는 서명 requirement가 같으면 권한을 보존하고 달라질 때만 초기화하며, 인증서가 없는 애드혹 업데이트는 재승인이 필요할 수 있습니다.</li><li>계정도, 추적도, 결제 유도도 없습니다.</li>',
-    s6k:"직접 써 보기", s6h:"받아서, 빌드하고, 목적지를 골라 캡처.",
-    s6p:'macOS 14+와 Xcode Command Line Tools가 필요합니다. <code>build.sh</code>는 안정적인 로컬 서명 인증서가 있으면 사용하고(없으면 애드혹 대체), <code>~/Applications</code> 설치 후 메뉴 호스트를 즉시 시작해 로그인 때도 띄웁니다. 새 메뉴에서 목적지를 고르세요. Karabiner에는 일회성 캡처용 <kbd>⌘⇧2</kbd>도 들어 있습니다.',
-    codeComment:"# 받아서 빌드",
+    s6k:"설치하기", s6h:"받아서, 드래그하고, 한 번 열기.",
+    s6p:'macOS 14+. <code>AIShot.app</code>을 <code>/Applications</code>로 드래그한 뒤 한 번 열면, 스스로 메뉴 막대 에이전트를 설치하고 로그인 때마다 다시 뜹니다. 공증되지 않은 앱이라 첫 실행에는 개인정보 보호 및 보안에서 "그래도 열기"가 한 번 필요하고, 미리 격리 플래그를 지워도 됩니다. 직접 빌드하고 싶다면 Xcode Command Line Tools가 필요하며, 결과는 완전히 같습니다. Karabiner에는 일회성 캡처용 <kbd>⌘⇧2</kbd>도 들어 있습니다.',
+    codeComment:"# AIShot.app을 /Applications로 드래그한 뒤",
     codeCommentMenu:"# 메뉴 호스트가 지금 실행되고 로그인 뒤에도 다시 시작",
-    codeComment2:"# 직접 캡처하거나 이 명령에 단축키 연결",
+    codeComment2:"# 또는 소스에서 빌드 — 같은 설치기, 같은 결과",
     footLab:"TechJuiceLab 작업실에서",
     footP:"AIShot은 제가 만드는 작고 단단한 도구 중 하나예요 — 진짜 성가심 하나를 제대로 없애고 조용히 비켜서는 것들. 무료에 오픈소스, 무엇보다 제 Mac에서 쓰고 싶어서 만들었습니다.",
     lkRel:"릴리스", lkDoc:"문서", lkIssues:"이슈"

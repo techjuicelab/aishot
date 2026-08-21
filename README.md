@@ -231,45 +231,55 @@ Preview what your current setup would do with `--self-test`.
 
 Requires macOS 14 or later (Apple Silicon or Intel).
 
-**Build from source** (requires Xcode Command Line Tools) — recommended,
-no Gatekeeper friction:
+**Download** — no toolchain, nothing to build:
+
+1. Get [**AIShot.dmg**](https://github.com/techjuicelab/aishot/releases/latest/download/AIShot.dmg)
+   from the latest release.
+2. Drag `AIShot.app` into `/Applications`.
+3. Open it once. AIShot installs its own menu bar LaunchAgent, confirms that it
+   did, and the icon appears in the menu bar — there and after every login.
+
+The app is **not notarized**, so a browser download arrives quarantined and the
+first launch is refused. Approve it under System Settings → Privacy & Security
+→ **Open Anyway** (on macOS 15 and later, right-click → Open no longer bypasses
+this), or clear the flag before launching:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/AIShot.app
+```
+
+**Build from source** (requires Xcode Command Line Tools):
 
 ```sh
 git clone https://github.com/techjuicelab/aishot.git
 cd aishot && ./build.sh   # builds, signs, installs, and starts the menu bar host
 ```
 
-The build installs AIShot into `/Applications` like any other Mac app, writes
-`~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist`, and starts the
-menu host immediately. The host starts automatically on later logins; captures
-remain separate one-shot processes. `/Applications` is group-writable for admin
-users, so no sudo is involved; on a managed Mac where it is locked down the
-build falls back to `~/Applications`, and the location can be set explicitly
-with `AISHOT_INSTALL_DIR=~/Applications ./build.sh`. Either way, a copy left at
-the other location is removed — two bundles sharing a bundle ID make `open -a`,
-the TCC identity and the menu bar item resolve ambiguously.
+Both routes end in the same state, because they run the same installer:
+`build.sh` compiles and signs the bundle and then calls `AIShot --install`,
+which is exactly what a copy dragged out of the DMG runs on its own first
+launch. That installer keeps a single registered copy in `/Applications`,
+writes `~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist`, and
+starts the menu host immediately; captures remain separate one-shot processes.
+`/Applications` is group-writable for admin users, so no sudo is involved. On a
+managed Mac where it is locked down the installer falls back to
+`~/Applications`, and the location can be set explicitly with
+`AISHOT_INSTALL_DIR=~/Applications`. Either way a copy left at the other
+location is removed — two bundles sharing a bundle ID make `open -a`, the TCC
+identity and the menu bar item resolve ambiguously.
+
+A copy started from anywhere else — the mounted DMG itself, `~/Downloads` —
+moves itself into the install directory before doing anything else. A
+LaunchAgent may only point at a bundle that will still be there once the volume
+is ejected.
 
 **Upgrading from an earlier install**: the bundle ID changed from
 `com.techjuicelab.aishot` to `space.techjuicelab.aishot`. macOS can wedge a
 bundle ID so its status item is created but never placed in the menu bar, and
 that state survives reboots and LaunchServices re-registration. Saved settings
-migrate to the new domain on first launch and `build.sh` retires the old
+migrate to the new domain on first launch and the installer retires the old
 LaunchAgent, but macOS sees a new app — **Screen Recording and Accessibility
 have to be granted once more**.
-
-**Or download** `AIShot.app.zip` from
-[Releases](https://github.com/techjuicelab/aishot/releases) and unzip into
-`/Applications`. The app is not notarized, so macOS quarantines the
-download — clear it with
-
-```sh
-xattr -dr com.apple.quarantine /Applications/AIShot.app
-```
-
-or launch it once and approve it under System Settings → Privacy & Security
-→ "Open Anyway" (on macOS 15+ right-click → Open no longer bypasses this).
-Downloaded app bundles do not run `build.sh`; after approval, start their menu
-host for the current session with `--menubar` as shown above.
 
 ## Automatic updates
 
@@ -367,6 +377,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | `--no-paste` | copy to clipboard only, never synthesize ⌘V | — |
 | `--timeout SEC` | how long the selection UI may wait | `300` |
 | `--self-test` | print folder / frontmost app / permission state and exit | — |
+| `--install` | wire this copy up — install it, register the LaunchAgent, start the host — and exit | what `build.sh` and install scripts call |
 
 ## Customize
 

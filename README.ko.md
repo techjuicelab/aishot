@@ -220,43 +220,54 @@ open -gnb space.techjuicelab.aishot --args --target codex
 
 macOS 14 이상 (Apple Silicon / Intel).
 
-**소스에서 빌드** (Xcode Command Line Tools 필요) — 권장, Gatekeeper 걸릴 일 없음:
+**다운로드** — 툴체인도, 빌드도 필요 없다:
+
+1. 최신 릴리스에서
+   [**AIShot.dmg**](https://github.com/techjuicelab/aishot/releases/latest/download/AIShot.dmg)를
+   받는다.
+2. `AIShot.app`을 `/Applications`로 드래그한다.
+3. 한 번 실행한다. AIShot이 스스로 메뉴 막대 LaunchAgent를 설치하고 그 사실을
+   알린다. 아이콘이 메뉴 막대에 나타나고, 이후 로그인 때마다 다시 뜬다.
+
+공증(notarize)되지 않은 앱이라 브라우저로 받은 파일에는 격리 플래그가 붙고 첫
+실행이 거부된다. 시스템 설정 → 개인정보 보호 및 보안 → **그래도 열기**로
+승인하거나(macOS 15부터는 우클릭 → 열기 우회가 더 이상 통하지 않는다), 실행 전에
+플래그를 지운다:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/AIShot.app
+```
+
+**소스에서 빌드** (Xcode Command Line Tools 필요):
 
 ```sh
 git clone https://github.com/techjuicelab/aishot.git
 cd aishot && ./build.sh   # 빌드·서명·설치 후 메뉴 막대 호스트 시작
 ```
 
-`build.sh`는 AIShot을 다른 앱과 마찬가지로 `/Applications`에 설치하고
-`~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist`을 만든 뒤 메뉴
-호스트를 즉시 시작한다. 이후 로그인 때마다 호스트가 자동으로 뜨며, 실제 캡처는
-계속 별도의 일회성 프로세스로 실행된다. `/Applications`는 관리자 계정에 쓰기
-권한이 있어 sudo가 필요 없다. 잠긴 관리형 Mac이면 자동으로 `~/Applications`로
-물러나며, 설치 위치는 `AISHOT_INSTALL_DIR=~/Applications ./build.sh`로 지정할
-수도 있다. 어느 쪽이든 다른 위치에 남은 이전 설치본은 자동으로 제거된다 —
-같은 번들 ID의 앱이 두 곳에 있으면 `open -a`, TCC 신원, 메뉴 막대 항목이
-모두 모호해진다.
+두 경로의 결과는 같다. 같은 설치기를 쓰기 때문이다 — `build.sh`는 번들을
+빌드·서명한 뒤 `AIShot --install`을 호출하고, 이는 DMG에서 드래그해 온 복사본이
+첫 실행 때 스스로 실행하는 것과 같은 코드다. 이 설치기는 `/Applications`에
+등록된 복사본을 하나만 남기고,
+`~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist`를 만든 뒤 메뉴
+호스트를 즉시 시작한다. 실제 캡처는 계속 별도의 일회성 프로세스로 실행된다.
+`/Applications`는 관리자 계정에 쓰기 권한이 있어 sudo가 필요 없다. 잠긴 관리형
+Mac이면 `~/Applications`로 물러나며, 설치 위치는
+`AISHOT_INSTALL_DIR=~/Applications`로 지정할 수도 있다. 어느 쪽이든 다른 위치에
+남은 이전 설치본은 자동으로 제거된다 — 같은 번들 ID의 앱이 두 곳에 있으면
+`open -a`, TCC 신원, 메뉴 막대 항목이 모두 모호해진다.
+
+그 밖의 위치에서 실행된 복사본 — 마운트된 DMG 안, `~/Downloads` — 은 다른 일을
+하기 전에 스스로 설치 위치로 옮겨 간다. LaunchAgent는 볼륨을 꺼낸 뒤에도 남아
+있는 번들만 가리킬 수 있기 때문이다.
 
 **기존 설치본에서 올라오는 경우**: 번들 ID가 `com.techjuicelab.aishot`에서
 `space.techjuicelab.aishot`으로 바뀌었다. macOS가 옛 ID를 붙잡아 메뉴 막대
 아이콘을 만들어놓고도 배치하지 않는 상태에 빠질 수 있고, 재부팅이나
 LaunchServices 재등록으로 풀리지 않기 때문이다. 저장된 설정은 첫 실행 때
-새 도메인으로 자동 이전되고 옛 LaunchAgent는 `build.sh`가 정리한다. 다만
+새 도메인으로 자동 이전되고 옛 LaunchAgent는 설치기가 정리한다. 다만
 macOS에게는 새 앱이므로 **화면 기록·손쉬운 사용 권한은 한 번 다시 허용**해야
 한다.
-
-**또는** [Releases](https://github.com/techjuicelab/aishot/releases)에서
-`AIShot.app.zip`을 받아 `/Applications`에 풀기. 공증(notarize)되지 않은 앱이라
-다운로드에 격리 플래그가 붙는다 — 아래 명령으로 제거하거나
-
-```sh
-xattr -dr com.apple.quarantine /Applications/AIShot.app
-```
-
-한 번 실행한 뒤 시스템 설정 → 개인정보 보호 및 보안 → "그래도 열기"로 승인
-(macOS 15부터는 우클릭 → 열기 우회가 더 이상 통하지 않는다).
-다운로드한 앱 번들은 `build.sh`를 실행하지 않으므로, 승인 후 위의
-`--menubar` 명령으로 현재 세션의 메뉴 호스트를 시작한다.
 
 ## 자동 업데이트
 
@@ -351,6 +362,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | `--no-paste` | 클립보드 복사까지만, 자동 ⌘V 안 함 | — |
 | `--timeout SEC` | 선택 UI 대기 시간 | `300` |
 | `--self-test` | 폴더·최전면 앱·권한 상태만 출력하고 종료 | — |
+| `--install` | 이 복사본을 설치 위치로 배선 — 설치·LaunchAgent 등록·호스트 시작 후 종료 | `build.sh`와 설치 스크립트가 호출 |
 
 ## 커스터마이즈
 
