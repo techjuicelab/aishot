@@ -116,6 +116,14 @@ ln -s /Applications "$STAGE/Applications"
 hdiutil create -quiet -volname AIShot -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 rm -rf "$STAGE"; STAGE=""
 
+# Both artifacts are made, so the build-tree bundle has done its job. Leaving it
+# behind is the ambiguity build.sh cleans up after an install: two bundles with
+# the same ID, and `open -a AIShot`, the TCC identity and the menu bar item all
+# resolve to whichever one macOS happened to register last.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f -u "$PWD/AIShot.app" || true
+rm -rf AIShot.app
+
 # --- sign and measure ---------------------------------------------------------
 # The EdDSA signature is what makes an update trustworthy: Sparkle installs a
 # download only if it verifies against the public key inside the *installed*
