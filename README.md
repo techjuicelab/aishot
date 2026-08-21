@@ -20,6 +20,7 @@ to the destination you chose from the [menu bar or Settings](#menu-bar):
 | Destination setting | Where every capture goes | What gets pasted |
 |---|---|---|
 | A specific app — Claude, Antigravity, ChatGPT, Codex, or any other app | that app, regardless of what was frontmost; AIShot opens it when needed by default | configurable: **Automatic**, **PNG image**, or **File path** |
+| A terminal — Ghostty, iTerm2, Terminal, WezTerm, kitty, Warp | the CLI agent you keep open there — Claude Code, Codex CLI, Gemini CLI — in whichever window, tab and split the terminal itself last had focused | escaped **file path** + auto ⌘V, optionally followed by <kbd>Return</kbd> |
 | Destination **Automatic** + a frontmost terminal or IDE — Ghostty, Terminal, iTerm2, kitty, WezTerm, Warp, VS Code, Antigravity, Cursor | the frontmost app | with Paste as **Automatic**: escaped **file path** + auto ⌘V |
 | Destination **Automatic** + a frontmost AI app or browser — Claude, Codex, ChatGPT, Gemini, Safari, Chrome | the frontmost app | with Paste as **Automatic**: the **PNG itself** + auto ⌘V |
 | Destination **Automatic** + anything else | clipboard only; no ⌘V is sent | with Paste as **Automatic**: the **PNG itself**, ready to paste manually |
@@ -146,6 +147,44 @@ Open **AIShot menu bar → Settings…**. Choose a preset such as Claude,
 Antigravity, ChatGPT, Codex, or Gemini, or pick any installed `.app` with
 **Choose Other…**. Once a destination is set, **every capture goes there
 regardless of which app was frontmost**.
+
+### CLI agents in a terminal
+
+The destination list has a second section for terminals — Ghostty, iTerm2,
+Terminal, WezTerm, kitty, Warp. What you are really aiming at there is the
+agent running inside: **Claude Code, Codex CLI and Gemini CLI all read an
+image from a file path in the prompt**, which is exactly what path mode
+pastes. Pin Ghostty and a shot taken in a browser, Figma or anywhere else
+switches to Ghostty and drops the path on the agent's prompt line.
+
+A CLI agent has no bundle ID of its own, so the terminal is the address. AIShot
+does not pick the window, tab or split — activating the terminal restores the
+surface you last worked in, and the paste lands there. With several agents
+open at once, switch to the one you want first, or leave the destination on
+**Automatic** and capture with that terminal in front.
+
+By default the path is left on the prompt line with the cursor after it, so
+you can type your question and send both together. To hand the shot over
+immediately instead, turn on **Press Return after pasting a path into a
+terminal** in Settings. It applies only to terminals in path mode — in an
+editor like VS Code a Return would just be a newline in the file.
+
+The same panel lets you choose:
+
+- **Paste as**: **Automatic** picks a file path for known terminal/IDE apps
+  and a PNG for other destinations; choose **PNG image** or **File path** to
+  force that format, including while the destination is Automatic.
+- **Open the destination app when it is not running**: on by default. AIShot
+  launches the configured app, brings it forward, and pastes. If the app
+  cannot be opened or activated, no ⌘V is sent and the capture remains on
+  the clipboard (the PNG file is still saved).
+- **Return to the previous app after pasting**: off by default, so focus stays
+  in the destination and you can immediately type your prompt.
+- **Automatic (frontmost app)** as the destination: keeps the
+  original routing behavior. With Paste as **Automatic**, known
+  terminals/IDEs receive a path, known AI apps/browsers receive the PNG, and
+  unsupported apps get clipboard-only.
+
 ### Advanced: CLI and `defaults`
 
 The menu bar is the normal way to configure AIShot. For scripts or dotfiles,
@@ -165,14 +204,18 @@ defaults write space.techjuicelab.aishot targetPasteMode image
 defaults write space.techjuicelab.aishot autoLaunchTarget -bool false
 defaults write space.techjuicelab.aishot returnFocus -bool true
 
+# optional: press Return after pasting a path into a terminal, so the CLI
+# agent receives the shot without a second keystroke
+defaults write space.techjuicelab.aishot pasteSubmit -bool true
+
 # restore Automatic destination routing
 defaults delete space.techjuicelab.aishot targetApp
 ```
 
 Destination aliases: `claude` · `codex` · `chatgpt` · `gemini` ·
 `antigravity` · `antigravity-ide` · `cursor` · `vscode` · `safari` ·
-`chrome`. Any other app can be selected in the picker or specified by bundle
-ID
+`chrome` · `ghostty` · `iterm` · `terminal` · `wezterm` · `kitty` · `warp`.
+Any other app can be selected in the picker or specified by bundle ID
 (`osascript -e 'id of app "SomeApp"'`).
 
 You can also bind a hotkey that sends that run to one specific app regardless
@@ -327,7 +370,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 
 ## Customize
 
-Add apps to either category **without rebuilding** — AIShot reads two
+Add apps to these categories **without rebuilding** — AIShot reads three
 `defaults` arrays at launch:
 
 ```sh
@@ -336,6 +379,9 @@ osascript -e 'id of app "SomeTerm"'
 
 defaults write space.techjuicelab.aishot extraPathApps  -array-add "com.example.someterm"
 defaults write space.techjuicelab.aishot extraImageApps -array-add "com.example.chatapp"
+
+# a terminal AIShot does not know, so that pasteSubmit's Return applies to it
+defaults write space.techjuicelab.aishot extraTerminalApps -array-add "com.example.someterm"
 ```
 
 Or edit `pathPasteIDs` / `imagePasteIDs` at the top of

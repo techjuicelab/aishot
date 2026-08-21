@@ -20,6 +20,7 @@
 | 목적지 설정 | 모든 캡처가 가는 곳 | 붙여넣는 형식 |
 |---|---|---|
 | 특정 앱 — Claude, Antigravity, ChatGPT, Codex 또는 다른 앱 | 무엇이 최전면이었든 그 앱. 필요하면 기본적으로 AIShot이 앱을 실행 | **자동**, **PNG 이미지**, **파일 경로** 중 설정 가능 |
+| 터미널 — Ghostty, iTerm2, Terminal, WezTerm, kitty, Warp | 그 안에 띄워 둔 CLI 에이전트 — Claude Code, Codex CLI, Gemini CLI. 터미널이 마지막으로 포커스하고 있던 창·탭·스플릿 | 이스케이프된 **파일 경로** + 자동 ⌘V, 원하면 이어서 <kbd>Enter</kbd> |
 | 목적지 **Automatic** + 최전면 터미널·IDE — Ghostty, Terminal, iTerm2, kitty, WezTerm, Warp, VS Code, Antigravity, Cursor | 최전면 앱 | Paste as **Automatic**일 때: 이스케이프된 **파일 경로** + 자동 ⌘V |
 | 목적지 **Automatic** + 최전면 AI 앱·브라우저 — Claude, Codex, ChatGPT, Gemini, Safari, Chrome | 최전면 앱 | Paste as **Automatic**일 때: **PNG 이미지** + 자동 ⌘V |
 | 목적지 **Automatic** + 그 외 모든 앱 | 클립보드 복사만 하고 ⌘V는 보내지 않음 | Paste as **Automatic**일 때: 수동으로 붙여넣을 수 있는 **PNG 이미지** |
@@ -137,6 +138,43 @@ open -gnb space.techjuicelab.aishot --args --menubar
 Codex, Gemini 같은 프리셋을 고르거나
 **Choose Other…**로 설치된 어떤 `.app`이든 선택할 수 있다. 목적지를 지정하면
 **어떤 앱이 최전면이었는지와 무관하게 모든 캡처가 그곳으로 간다**.
+
+### 터미널 안의 CLI 에이전트
+
+목적지 목록에는 터미널 구역이 따로 있다 — Ghostty, iTerm2, Terminal, WezTerm,
+kitty, Warp. 여기서 실제로 겨냥하는 것은 그 안에서 돌고 있는 에이전트다.
+**Claude Code, Codex CLI, Gemini CLI는 모두 프롬프트에 적힌 파일 경로로 이미지를
+읽는데**, 경로 모드가 붙여넣는 것이 정확히 그것이다. Ghostty를 목적지로 지정해
+두면 브라우저든 Figma든 어디서 찍어도 Ghostty로 전환한 뒤 에이전트의 프롬프트
+줄에 경로가 떨어진다.
+
+CLI 에이전트에는 자기 번들 ID가 없으므로 주소 역할은 터미널이 한다. AIShot은
+창·탭·스플릿을 고르지 않는다 — 터미널을 활성화하면 마지막으로 작업하던 화면이
+돌아오고 붙여넣기는 거기로 간다. 에이전트를 여러 개 띄워 뒀다면 원하는 쪽으로
+먼저 전환하거나, 목적지를 **Automatic**으로 두고 그 터미널을 앞에 둔 채 찍으면
+된다.
+
+기본값은 경로만 넣고 커서를 그 뒤에 남기는 것이라, 질문을 이어 쓴 뒤 함께 보낼
+수 있다. 바로 넘기고 싶으면 설정에서 **터미널에 경로를 붙여넣은 뒤 Enter로
+바로 보내기**를 켠다. 경로 모드의 터미널에만 적용된다 — VS Code 같은 편집기에서
+Enter는 그냥 파일 안의 줄바꿈이기 때문이다.
+
+같은 설정창에서 다음 항목도 고를 수 있다:
+
+- **Paste as**: **Automatic**은 알려진 터미널·IDE 목적지에는 파일 경로를,
+  그 외 목적지에는 PNG를 쓴다. **PNG image** 또는 **File path**로 형식을
+  고정할 수도 있으며 목적지가 Automatic일 때도 이 설정이 적용된다.
+- **Open the destination app when it is not running**: 기본으로 켜져 있다.
+  지정 앱이 꺼져 있으면 AIShot이 실행하고 최전면으로 가져와 붙여넣는다.
+  앱을 실행하거나 활성화하지 못하면 ⌘V를 보내지 않고 캡처를 클립보드에
+  남긴다(PNG 파일 저장은 항상 완료됨).
+- **Return to the previous app after pasting**: 기본으로 꺼져 있어 붙여넣은 뒤
+  지정 앱에 포커스가 남고, 바로 프롬프트를 입력할 수 있다.
+- 목적지의 **Automatic (frontmost app)**: 기존 최전면 라우팅을
+  그대로 유지한다. Paste as도 **Automatic**일 때 알려진 터미널·IDE에는 경로,
+  알려진 AI 앱·브라우저에는 PNG를 보내고, 지원하지 않는 앱에서는 클립보드
+  복사만 한다.
+
 ### 고급: CLI와 `defaults`
 
 일반적인 설정은 메뉴 막대를 쓰면 된다. 스크립트나 dotfiles에서는 같은 설정창과
@@ -156,12 +194,16 @@ defaults write space.techjuicelab.aishot targetPasteMode image
 defaults write space.techjuicelab.aishot autoLaunchTarget -bool false
 defaults write space.techjuicelab.aishot returnFocus -bool true
 
+# 선택: 터미널에 경로를 붙여넣은 뒤 Enter를 눌러 CLI 에이전트에 바로 넘기기
+defaults write space.techjuicelab.aishot pasteSubmit -bool true
+
 # 목적지를 Automatic으로 복원
 defaults delete space.techjuicelab.aishot targetApp
 ```
 
 목적지 별칭: `claude` · `codex` · `chatgpt` · `gemini` · `antigravity` ·
-`antigravity-ide` · `cursor` · `vscode` · `safari` · `chrome`. 그 외 앱은
+`antigravity-ide` · `cursor` · `vscode` · `safari` · `chrome` · `ghostty` ·
+`iterm` · `terminal` · `wezterm` · `kitty` · `warp`. 그 외 앱은
 선택창에서 고르거나 번들 ID로 지정한다
 (`osascript -e 'id of app "SomeApp"'`).
 
@@ -312,7 +354,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 
 ## 커스터마이즈
 
-**재빌드 없이** 앱 분류 추가 — AIShot은 실행 시 `defaults` 배열 두 개를 읽는다:
+**재빌드 없이** 앱 분류 추가 — AIShot은 실행 시 `defaults` 배열 세 개를 읽는다:
 
 ```sh
 # 앱의 번들 ID 확인
@@ -320,6 +362,9 @@ osascript -e 'id of app "SomeTerm"'
 
 defaults write space.techjuicelab.aishot extraPathApps  -array-add "com.example.someterm"
 defaults write space.techjuicelab.aishot extraImageApps -array-add "com.example.chatapp"
+
+# AIShot이 모르는 터미널 — pasteSubmit의 Enter가 여기에도 적용되게 한다
+defaults write space.techjuicelab.aishot extraTerminalApps -array-add "com.example.someterm"
 ```
 
 또는 [`main.swift`](main.swift) 상단의 `pathPasteIDs` / `imagePasteIDs`를

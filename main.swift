@@ -63,7 +63,7 @@ let pathPasteIDs = Set([
     "com.googlecode.iterm2",
     "net.kovidgoyal.kitty",
     "com.github.wez.wezterm",
-    "dev.warp.Warp",
+    "dev.warp.Warp-Stable",
     "com.microsoft.VSCode",
     "com.google.antigravity",
     "com.google.antigravity-ide",
@@ -86,10 +86,18 @@ let imagePasteIDs = Set([
 //   defaults delete space.techjuicelab.aishot targetApp
 // After pasting, focus stays in the target app; to hop back instead:
 //   defaults write space.techjuicelab.aishot returnFocus -bool true
+// Presets are grouped in the menu: the apps you paste *into* first, then the
+// terminals, whose real destination is the CLI agent running inside them.
+enum TargetKind {
+    case app
+    case terminal
+}
+
 struct TargetPreset {
     let alias: String
     let name: String
     let bundleID: String
+    var kind: TargetKind = .app
 }
 
 let targetPresets = [
@@ -103,9 +111,35 @@ let targetPresets = [
     TargetPreset(alias: "vscode", name: "Visual Studio Code", bundleID: "com.microsoft.VSCode"),
     TargetPreset(alias: "safari", name: "Safari", bundleID: "com.apple.Safari"),
     TargetPreset(alias: "chrome", name: "Google Chrome", bundleID: "com.google.Chrome"),
+    // Terminals. Pinning one routes every shot to the CLI agent you keep open
+    // there — Claude Code, Codex CLI and Gemini CLI all take an image as a file
+    // path in the prompt, which is exactly what path mode pastes. Which pane
+    // receives it is the terminal's own business: activating the app restores
+    // the window, tab and split you last worked in, and that is where ⌘V lands.
+    TargetPreset(alias: "ghostty", name: "Ghostty", bundleID: "com.mitchellh.ghostty",
+                 kind: .terminal),
+    TargetPreset(alias: "iterm", name: "iTerm2", bundleID: "com.googlecode.iterm2",
+                 kind: .terminal),
+    TargetPreset(alias: "terminal", name: "Terminal", bundleID: "com.apple.Terminal",
+                 kind: .terminal),
+    TargetPreset(alias: "wezterm", name: "WezTerm", bundleID: "com.github.wez.wezterm",
+                 kind: .terminal),
+    TargetPreset(alias: "kitty", name: "kitty", bundleID: "net.kovidgoyal.kitty",
+                 kind: .terminal),
+    // Warp ships as dev.warp.Warp-Stable; the unsuffixed ID matches nothing, so
+    // an entry using it is invisible in the menu and dead as a destination.
+    TargetPreset(alias: "warp", name: "Warp", bundleID: "dev.warp.Warp-Stable",
+                 kind: .terminal),
 ]
 let targetAliases = Dictionary(uniqueKeysWithValues: targetPresets.map { ($0.alias, $0.bundleID) })
 
+// Destinations where a pasted path is a shell/TUI prompt line, so pressing
+// Return after it means "send this to the agent". Kept apart from pathPasteIDs,
+// which also holds editors: a Return in VS Code is just a newline in a file.
+// Add a terminal AIShot does not know with:
+//   defaults write space.techjuicelab.aishot extraTerminalApps -array-add "com.example.term"
+let terminalIDs = Set(targetPresets.filter { $0.kind == .terminal }.map(\.bundleID)
+    + extraIDs("extraTerminalApps"))
 
 // MARK: - interface language
 
@@ -373,6 +407,13 @@ let returnFocus = (CFPreferencesCopyAppValue("returnFocus" as CFString,
                                              "space.techjuicelab.aishot" as CFString) as? Bool) ?? false
 let autoLaunchTarget = (CFPreferencesCopyAppValue("autoLaunchTarget" as CFString,
                                                   "space.techjuicelab.aishot" as CFString) as? Bool) ?? true
+// Press Return after pasting a path into a terminal, so the CLI agent receives
+// the shot without a second keystroke. Off by default: the usual reason to send
+// a screenshot to Claude Code is to ask something about it, and submitting a
+// bare path costs a turn and the chance to type the question.
+//   defaults write space.techjuicelab.aishot pasteSubmit -bool true
+let pasteSubmit = (CFPreferencesCopyAppValue("pasteSubmit" as CFString,
+                                             "space.techjuicelab.aishot" as CFString) as? Bool) ?? false
 
 func runningApp(_ bundleID: String) -> NSRunningApplication? {
     NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
@@ -474,26 +515,34 @@ func presentSettings() {
     app.setActivationPolicy(.accessory)
     app.activate()
 
-    let destinationPopup = NSPopUpButton(frame: NSRect(x: 112, y: 256, width: 250, height: 26))
+    let destinationPopup = NSPopUpButton(frame: NSRect(x: 112, y: 284, width: 250, height: 26))
     destinationPopup.addItem(withTitle: t("자동 (최전면 앱)", "Automatic (frontmost app)"))
     destinationPopup.lastItem?.representedObject = ""
-    for preset in targetPresets {
-        let installed = NSWorkspace.shared.urlForApplication(withBundleIdentifier: preset.bundleID) != nil
-        let displayName = appDisplayName(bundleID: preset.bundleID)
-        let name = !installed ? preset.name + t(" (미설치)", " (not installed)")
-            : (displayName.caseInsensitiveCompare(preset.name) == .orderedSame
-                ? displayName : "\(preset.name) (\(displayName))")
-        addTargetItem(to: destinationPopup, name: name,
-                      bundleID: preset.bundleID, select: storedTargetID == preset.bundleID)
+    for kind in [TargetKind.app, .terminal] {
+        if kind == .terminal {
+            destinationPopup.menu?.addItem(.separator())
+            destinationPopup.menu?.addItem(.sectionHeader(title: t("터미널 — Claude Code · Codex CLI · Gemini CLI",
+                                                                   "Terminal — Claude Code · Codex CLI · Gemini CLI")))
+        }
+        for preset in targetPresets where preset.kind == kind {
+            let installed = NSWorkspace.shared.urlForApplication(withBundleIdentifier: preset.bundleID) != nil
+            let displayName = appDisplayName(bundleID: preset.bundleID)
+            let name = !installed ? preset.name + t(" (미설치)", " (not installed)")
+                : (displayName.caseInsensitiveCompare(preset.name) == .orderedSame
+                    ? displayName : "\(preset.name) (\(displayName))")
+            addTargetItem(to: destinationPopup, name: name,
+                          bundleID: preset.bundleID, select: storedTargetID == preset.bundleID)
+        }
     }
     if let current = storedTargetID,
        !destinationPopup.itemArray.contains(where: { ($0.representedObject as? String) == current }) {
+        destinationPopup.menu?.addItem(.separator()) // out of the terminal section
         addTargetItem(to: destinationPopup, name: appDisplayName(bundleID: current),
                       bundleID: current, select: true)
     }
     if storedTargetID == nil { destinationPopup.selectItem(at: 0) }
 
-    let formatPopup = NSPopUpButton(frame: NSRect(x: 112, y: 217, width: 250, height: 26))
+    let formatPopup = NSPopUpButton(frame: NSRect(x: 112, y: 245, width: 250, height: 26))
     for (title, value) in [(t("자동", "Automatic"), "auto"),
                            (t("PNG 이미지", "PNG image"), "image"),
                            (t("파일 경로", "File path"), "path")] {
@@ -504,7 +553,7 @@ func presentSettings() {
 
     // How a scrolling capture's recognized text is delivered. The image alone is
     // not enough there — see the scrollOcrMode notes at the capture site.
-    let ocrPopup = NSPopUpButton(frame: NSRect(x: 112, y: 178, width: 250, height: 26))
+    let ocrPopup = NSPopUpButton(frame: NSRect(x: 112, y: 206, width: 250, height: 26))
     let currentOcrMode = storedScrollOcrMode()
     for (title, value) in [(t("안 함 — 이미지만 (빠름)", "Off — image only (fastest)"), "off"),
                            (t("텍스트 파일로 저장 (.txt)", "Save text file (.txt)"), "sidecar"),
@@ -519,7 +568,7 @@ func presentSettings() {
     let pinnedLanguage = (CFPreferencesCopyAppValue("language" as CFString,
                                                     "space.techjuicelab.aishot" as CFString) as? String)?
         .lowercased()
-    let languagePopup = NSPopUpButton(frame: NSRect(x: 112, y: 139, width: 250, height: 26))
+    let languagePopup = NSPopUpButton(frame: NSRect(x: 112, y: 167, width: 250, height: 26))
     for (title, value) in [(t("시스템 언어 따름", "Follow system language"), "auto"),
                            ("한국어", "ko"), ("English", "en")] {
         languagePopup.addItem(withTitle: title)
@@ -529,7 +578,7 @@ func presentSettings() {
         }
     }
 
-    let folderPopup = NSPopUpButton(frame: NSRect(x: 112, y: 100, width: 250, height: 26))
+    let folderPopup = NSPopUpButton(frame: NSRect(x: 112, y: 128, width: 250, height: 26))
     let systemFolder = (systemScreenshotFolder() as NSString).abbreviatingWithTildeInPath
     folderPopup.addItem(withTitle: t("시스템 폴더 — \(systemFolder)", "System folder — \(systemFolder)"))
     folderPopup.lastItem?.representedObject = ""
@@ -543,13 +592,13 @@ func presentSettings() {
 
     let controller = SettingsController(popup: destinationPopup, folderPopup: folderPopup)
 
-    let chooseButton = NSButton(frame: NSRect(x: 372, y: 255, width: 148, height: 28))
+    let chooseButton = NSButton(frame: NSRect(x: 372, y: 283, width: 148, height: 28))
     chooseButton.title = t("다른 앱 선택…", "Choose Other…")
     chooseButton.bezelStyle = .rounded
     chooseButton.target = controller
     chooseButton.action = #selector(SettingsController.chooseOtherApplication(_:))
 
-    let folderButton = NSButton(frame: NSRect(x: 372, y: 99, width: 148, height: 28))
+    let folderButton = NSButton(frame: NSRect(x: 372, y: 127, width: 148, height: 28))
     folderButton.title = t("폴더 선택…", "Choose Folder…")
     folderButton.bezelStyle = .rounded
     folderButton.target = controller
@@ -559,15 +608,22 @@ func presentSettings() {
         checkboxWithTitle: t("목적지 앱이 꺼져 있으면 실행하기",
                              "Open the destination app when it is not running"),
         target: nil, action: nil)
-    launchCheckbox.frame = NSRect(x: 112, y: 68, width: 408, height: 24)
+    launchCheckbox.frame = NSRect(x: 112, y: 96, width: 408, height: 24)
     launchCheckbox.state = autoLaunchTarget ? .on : .off
 
     let returnCheckbox = NSButton(
         checkboxWithTitle: t("붙여넣은 뒤 이전 앱으로 돌아가기",
                              "Return to the previous app after pasting"),
         target: nil, action: nil)
-    returnCheckbox.frame = NSRect(x: 112, y: 40, width: 408, height: 24)
+    returnCheckbox.frame = NSRect(x: 112, y: 68, width: 408, height: 24)
     returnCheckbox.state = returnFocus ? .on : .off
+
+    let submitCheckbox = NSButton(
+        checkboxWithTitle: t("터미널에 경로를 붙여넣은 뒤 Enter로 바로 보내기",
+                             "Press Return after pasting a path into a terminal"),
+        target: nil, action: nil)
+    submitCheckbox.frame = NSRect(x: 112, y: 40, width: 408, height: 24)
+    submitCheckbox.state = pasteSubmit ? .on : .off
 
     func label(_ text: String, y: CGFloat) -> NSTextField {
         let field = NSTextField(labelWithString: text)
@@ -575,11 +631,11 @@ func presentSettings() {
         field.alignment = .right
         return field
     }
-    let destinationLabel = label(t("목적지", "Destination"), y: 259)
-    let formatLabel = label(t("붙여넣기 형식", "Paste as"), y: 220)
-    let ocrLabel = label(t("스크롤 OCR", "Scroll OCR"), y: 181)
-    let languageLabel = label(t("언어", "Language"), y: 142)
-    let folderLabel = label(t("저장 폴더", "Save folder"), y: 103)
+    let destinationLabel = label(t("목적지", "Destination"), y: 287)
+    let formatLabel = label(t("붙여넣기 형식", "Paste as"), y: 248)
+    let ocrLabel = label(t("스크롤 OCR", "Scroll OCR"), y: 209)
+    let languageLabel = label(t("언어", "Language"), y: 170)
+    let folderLabel = label(t("저장 폴더", "Save folder"), y: 131)
 
     let note = NSTextField(wrappingLabelWithString: t(
         "붙여넣은 뒤에도 이미지나 파일 경로는 클립보드에 그대로 남습니다. 언어를 바꾸면 메뉴 막대에는 바로, 이 창에는 다음에 열 때 반영됩니다.",
@@ -588,10 +644,11 @@ func presentSettings() {
     note.textColor = .secondaryLabelColor
     note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
 
-    let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 285))
+    let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 313))
     [destinationLabel, destinationPopup, chooseButton, formatLabel, formatPopup,
      ocrLabel, ocrPopup, languageLabel, languagePopup, folderLabel, folderPopup,
-     folderButton, launchCheckbox, returnCheckbox, note].forEach(accessory.addSubview)
+     folderButton, launchCheckbox, returnCheckbox, submitCheckbox,
+     note].forEach(accessory.addSubview)
 
     let alert = NSAlert()
     alert.messageText = t("AIShot 설정", "AIShot Settings")
@@ -625,6 +682,8 @@ func presentSettings() {
                              launchCheckbox.state == .on ? kCFBooleanTrue : kCFBooleanFalse, domain)
     CFPreferencesSetAppValue("returnFocus" as CFString,
                              returnCheckbox.state == .on ? kCFBooleanTrue : kCFBooleanFalse, domain)
+    CFPreferencesSetAppValue("pasteSubmit" as CFString,
+                             submitCheckbox.state == .on ? kCFBooleanTrue : kCFBooleanFalse, domain)
     CFPreferencesAppSynchronize(domain)
     log(selectedID.isEmpty
         ? "destination set to Automatic"
@@ -816,17 +875,36 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                            selected: currentID == nil, to: submenu)
         submenu.addItem(.separator())
 
-        for preset in targetPresets {
-            let installed = NSWorkspace.shared.urlForApplication(
-                withBundleIdentifier: preset.bundleID) != nil
-            guard installed || currentID == preset.bundleID else { continue }
-            addDestinationItem(title: destinationDisplayName(bundleID: preset.bundleID),
-                               bundleID: preset.bundleID,
-                               selected: currentID == preset.bundleID, to: submenu)
+        // Apps first, then terminals under their own heading. A terminal is
+        // listed as a destination in its own right because what the user is
+        // aiming at is the CLI agent inside it, and that agent has no bundle ID
+        // of its own to pick.
+        for kind in [TargetKind.app, .terminal] {
+            let visible = targetPresets.filter { preset in
+                guard preset.kind == kind else { return false }
+                let installed = NSWorkspace.shared.urlForApplication(
+                    withBundleIdentifier: preset.bundleID) != nil
+                return installed || currentID == preset.bundleID
+            }
+            guard !visible.isEmpty else { continue }
+            if kind == .terminal {
+                submenu.addItem(.separator())
+                submenu.addItem(.sectionHeader(title: t("터미널 — Claude Code · Codex CLI · Gemini CLI",
+                                                        "Terminal — Claude Code · Codex CLI · Gemini CLI")))
+            }
+            for preset in visible {
+                addDestinationItem(title: destinationDisplayName(bundleID: preset.bundleID),
+                                   bundleID: preset.bundleID,
+                                   selected: currentID == preset.bundleID, to: submenu)
+            }
         }
 
+        // A section header groups everything after it until the next separator,
+        // so an app picked with "Choose Other…" would otherwise be listed as a
+        // terminal running a CLI agent. Close the group first.
         if let currentID,
            !targetPresets.contains(where: { $0.bundleID == currentID }) {
+            submenu.addItem(.separator())
             addDestinationItem(title: appDisplayName(bundleID: currentID),
                                bundleID: currentID, selected: true, to: submenu)
         }
@@ -1244,6 +1322,29 @@ func postPasteShortcut(to app: NSRunningApplication) -> Bool {
     return true
 }
 
+/// Return, for a terminal destination with pasteSubmit on: the path is sitting
+/// on the prompt line and this is what hands it to the CLI agent.
+@discardableResult
+func postReturnKey(to app: NSRunningApplication) -> Bool {
+    guard !app.isTerminated,
+          let source = CGEventSource(stateID: .combinedSessionState),
+          let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true),
+          let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false) else {
+        return false
+    }
+    // .combinedSessionState seeds a new event with the modifiers the user is
+    // physically holding, and this fires about a second after the capture
+    // gesture — long enough that a Shift-constrained drag or an Option-click on
+    // a window is often still down. postPasteShortcut is immune only because it
+    // overwrites flags with ⌘; here an inherited ⇧ or ⌥ would turn Return into
+    // "newline, do not send" in exactly the CLI agents this is meant to reach.
+    keyDown.flags = []
+    keyUp.flags = []
+    keyDown.postToPid(app.processIdentifier)
+    keyUp.postToPid(app.processIdentifier)
+    usleep(80_000)
+    return true
+}
 
 if selfTest {
     let r = effectiveRoute()
@@ -1260,7 +1361,9 @@ if selfTest {
     log("screen-record:  \(CGPreflightScreenCaptureAccess() ? "granted" : "NOT granted")")
     log("accessibility:  \(AXIsProcessTrusted() ? "granted" : "NOT granted")")
     if r.autoPaste, let id = r.bundleID {
-        log("would paste as: \(r.mode) into \(destinationDisplayName(bundleID: id))")
+        let submits = pasteSubmit && r.mode == "path" && terminalIDs.contains(id)
+        log("would paste as: \(r.mode) into \(destinationDisplayName(bundleID: id))"
+            + (submits ? " and press Return" : ""))
     } else {
         log("would paste as: \(r.mode) (clipboard only)")
     }
@@ -1772,6 +1875,20 @@ if let followUp = scrollFollowUpText, pasteMode == "image" {
     pasteFollowUpText(followUp, into: dest)
 }
 
+// pasteSubmit: hand the path to the CLI agent on the prompt line. Gated on a
+// terminal destination in path mode — a Return anywhere else is a newline in
+// whatever the user was writing, and after an image paste it would submit an
+// unfinished message. The wait covers the terminal's bracketed-paste round trip
+// into the TUI; submitting before the path is on the line sends an empty turn.
+if pasteSubmit, pasteMode == "path",
+   let destinationID = dest.bundleIdentifier, terminalIDs.contains(destinationID) {
+    usleep(250_000)
+    if postReturnKey(to: dest) {
+        log("pressed Return in \(targetName) (pasteSubmit)")
+    } else {
+        log("could not press Return in \(targetName) — the path is on the prompt line")
+    }
+}
 if returnFocus, let front, front.processIdentifier != dest.processIdentifier {
     usleep(500_000) // let the app ingest the paste before it loses focus
     front.activate(options: [.activateAllWindows])
