@@ -1,7 +1,18 @@
 <?xml version="1.0" standalone="yes"?>
-<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+<rss xmlns:aishot="https://aishot.techjuicelab.site/appcast" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>AIShot</title>
+        <item>
+            <title>1.7</title>
+            <pubDate>Fri, 21 Aug 2026 21:28:45 +0900</pubDate>
+            <link>https://github.com/techjuicelab/aishot</link>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>1.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/techjuicelab/aishot/releases/download/v1.7/AIShot-1.7.zip" length="3414810" type="application/octet-stream" sparkle:edSignature="Vg2uhoD2DjXzOYhpYA10he2msQoqMgHhBmTNDUcvu0oZejdxnE4ZJsbJUMNvzJOqjVWN7s1uM5MUpnqhrEvlDQ=="/>
+            <aishot:sha256>6c92afc3f2b1c92ae5851a5e48c0b4b028c9ae340e9aef844c19cc75eebfa511</aishot:sha256>
+            <aishot:dmg url="https://github.com/techjuicelab/aishot/releases/download/v1.7/AIShot.dmg" length="3664478" sha256="1648b5f4ca283e6d9ed1d6b72de8a52fc8b8989bb3a189719e5302cffa2e8877" sparkle:edSignature="N+kgkxSPdDXdp0Df1QV95Y8+Q5JG+x/XDTgyTYJ1r1f7BZtH7RDfEjeRTwgT7mayV7jBHzbGY7CFX2t+yd35CA=="/>
+        </item>
         <item>
             <title>1.6</title>
             <pubDate>Thu, 06 Aug 2026 02:44:11 +0900</pubDate>
