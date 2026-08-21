@@ -108,9 +108,12 @@ if [ -n "$SPARKLE_FRAMEWORKS" ]; then
                  -Xlinker -rpath -Xlinker @executable_path/../Frameworks)
 fi
 
-# Universal binary (Apple Silicon + Intel), deployment target macOS 14
-swiftc -O -target arm64-apple-macos14.0  "${SPARKLE_FLAGS[@]}" -o /tmp/aishot-arm64  main.swift
-swiftc -O -target x86_64-apple-macos14.0 "${SPARKLE_FLAGS[@]}" -o /tmp/aishot-x86_64 main.swift
+# Universal binary (Apple Silicon + Intel), deployment target macOS 14.
+# main.swift must stay in the list: swiftc picks the entry point by that name,
+# and every other file is a plain declaration-only source compiled alongside it.
+SOURCES=(main.swift ScrollCapture.swift)
+swiftc -O -target arm64-apple-macos14.0  "${SPARKLE_FLAGS[@]}" -o /tmp/aishot-arm64  "${SOURCES[@]}"
+swiftc -O -target x86_64-apple-macos14.0 "${SPARKLE_FLAGS[@]}" -o /tmp/aishot-x86_64 "${SOURCES[@]}"
 lipo -create /tmp/aishot-arm64 /tmp/aishot-x86_64 -output "$BIN"
 rm -f /tmp/aishot-arm64 /tmp/aishot-x86_64
 

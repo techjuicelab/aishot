@@ -106,6 +106,7 @@ let targetPresets = [
 ]
 let targetAliases = Dictionary(uniqueKeysWithValues: targetPresets.map { ($0.alias, $0.bundleID) })
 
+
 // MARK: - interface language
 
 // The menu bar and the settings panel follow the system language and can be
@@ -185,6 +186,10 @@ var selfTest = false
 var chooseDir = false
 var showSettings = false
 var showMenuBar = false
+var scrollMode = false // --scroll: pick a window and capture it all the way down
+var scrollWindowID: CGWindowID? // --window ID: skip the picker, scroll this window
+var listWindows = false // --list-windows: print the IDs --window accepts
+var scrollDebugDir: String? // --scroll-debug DIR: dump every raw frame and trace the run
 var targetRaw: String? // --target alias|bundle-id: force the destination for this run
 var assumeFrontRaw: String? // --assume-front bundle-id: the app the menu host saw
 
@@ -213,6 +218,18 @@ while let arg = argIt.next() {
     case "--choose-dir": chooseDir = true
     case "--settings":   showSettings = true
     case "--menubar":    showMenuBar = true
+    case "--scroll":     scrollMode = true
+    case "--window":
+        guard let value = argIt.next(), let id = UInt32(value) else {
+            fail("--window requires a numeric window ID (see --list-windows)")
+        }
+        scrollWindowID = id
+        scrollMode = true
+    case "--list-windows": listWindows = true
+    case "--scroll-debug":
+        guard let value = argIt.next() else { fail("--scroll-debug requires a directory") }
+        scrollDebugDir = value
+        scrollMode = true
     case "--capture":    break // explicit alias for the default one-shot capture mode
     default:             fail("unknown flag: \(arg)")
     }
@@ -457,7 +474,7 @@ func presentSettings() {
     app.setActivationPolicy(.accessory)
     app.activate()
 
-    let destinationPopup = NSPopUpButton(frame: NSRect(x: 112, y: 217, width: 250, height: 26))
+    let destinationPopup = NSPopUpButton(frame: NSRect(x: 112, y: 256, width: 250, height: 26))
     destinationPopup.addItem(withTitle: t("자동 (최전면 앱)", "Automatic (frontmost app)"))
     destinationPopup.lastItem?.representedObject = ""
     for preset in targetPresets {
@@ -476,13 +493,27 @@ func presentSettings() {
     }
     if storedTargetID == nil { destinationPopup.selectItem(at: 0) }
 
-    let formatPopup = NSPopUpButton(frame: NSRect(x: 112, y: 178, width: 250, height: 26))
+    let formatPopup = NSPopUpButton(frame: NSRect(x: 112, y: 217, width: 250, height: 26))
     for (title, value) in [(t("자동", "Automatic"), "auto"),
                            (t("PNG 이미지", "PNG image"), "image"),
                            (t("파일 경로", "File path"), "path")] {
         formatPopup.addItem(withTitle: title)
         formatPopup.lastItem?.representedObject = value
         if value == storedTargetMode { formatPopup.select(formatPopup.lastItem!) }
+    }
+
+    // How a scrolling capture's recognized text is delivered. The image alone is
+    // not enough there — see the scrollOcrMode notes at the capture site.
+    let ocrPopup = NSPopUpButton(frame: NSRect(x: 112, y: 178, width: 250, height: 26))
+    let currentOcrMode = storedScrollOcrMode()
+    for (title, value) in [(t("안 함 — 이미지만 (빠름)", "Off — image only (fastest)"), "off"),
+                           (t("텍스트 파일로 저장 (.txt)", "Save text file (.txt)"), "sidecar"),
+                           (t("이미지+텍스트 둘 다 붙여넣기", "Paste image, then text"), "doublePaste"),
+                           (t("텍스트만 붙여넣기", "Paste text only"), "textOnly"),
+                           (t("자동 — 길면 텍스트", "Automatic — text when too tall"), "auto")] {
+        ocrPopup.addItem(withTitle: title)
+        ocrPopup.lastItem?.representedObject = value
+        if value == currentOcrMode { ocrPopup.select(ocrPopup.lastItem!) }
     }
 
     let pinnedLanguage = (CFPreferencesCopyAppValue("language" as CFString,
@@ -512,7 +543,7 @@ func presentSettings() {
 
     let controller = SettingsController(popup: destinationPopup, folderPopup: folderPopup)
 
-    let chooseButton = NSButton(frame: NSRect(x: 372, y: 216, width: 148, height: 28))
+    let chooseButton = NSButton(frame: NSRect(x: 372, y: 255, width: 148, height: 28))
     chooseButton.title = t("다른 앱 선택…", "Choose Other…")
     chooseButton.bezelStyle = .rounded
     chooseButton.target = controller
@@ -544,8 +575,9 @@ func presentSettings() {
         field.alignment = .right
         return field
     }
-    let destinationLabel = label(t("목적지", "Destination"), y: 220)
-    let formatLabel = label(t("붙여넣기 형식", "Paste as"), y: 181)
+    let destinationLabel = label(t("목적지", "Destination"), y: 259)
+    let formatLabel = label(t("붙여넣기 형식", "Paste as"), y: 220)
+    let ocrLabel = label(t("스크롤 OCR", "Scroll OCR"), y: 181)
     let languageLabel = label(t("언어", "Language"), y: 142)
     let folderLabel = label(t("저장 폴더", "Save folder"), y: 103)
 
@@ -556,10 +588,10 @@ func presentSettings() {
     note.textColor = .secondaryLabelColor
     note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
 
-    let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 246))
+    let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 285))
     [destinationLabel, destinationPopup, chooseButton, formatLabel, formatPopup,
-     languageLabel, languagePopup, folderLabel, folderPopup, folderButton,
-     launchCheckbox, returnCheckbox, note].forEach(accessory.addSubview)
+     ocrLabel, ocrPopup, languageLabel, languagePopup, folderLabel, folderPopup,
+     folderButton, launchCheckbox, returnCheckbox, note].forEach(accessory.addSubview)
 
     let alert = NSAlert()
     alert.messageText = t("AIShot 설정", "AIShot Settings")
@@ -581,6 +613,8 @@ func presentSettings() {
     }
     let selectedMode = (formatPopup.selectedItem?.representedObject as? String) ?? "auto"
     CFPreferencesSetAppValue("targetPasteMode" as CFString, selectedMode as CFString, domain)
+    let selectedOcrMode = (ocrPopup.selectedItem?.representedObject as? String) ?? "sidecar"
+    CFPreferencesSetAppValue("scrollOcrMode" as CFString, selectedOcrMode as CFString, domain)
     let selectedLanguage = (languagePopup.selectedItem?.representedObject as? String) ?? "auto"
     CFPreferencesSetAppValue("language" as CFString,
                              selectedLanguage == "auto" ? nil : selectedLanguage as CFString, domain)
@@ -673,6 +707,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         rebuildMenu()
         statusItem.menu = menu
         log("menu bar host started (status item visible: \(statusItem.isVisible))")
+        // Asked for here rather than in a capture worker: authorization is
+        // per-bundle, and only this long-lived process is registered as a
+        // notification client. Once granted, the workers can post banners.
+        requestNotificationAuthorization()
     }
 
     deinit {
@@ -688,6 +726,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                                      action: #selector(captureScreenshot(_:)), keyEquivalent: "")
         captureItem.target = self
         menu.addItem(captureItem)
+
+        let scrollCaptureItem = NSMenuItem(
+            title: t("스크롤 스크린샷 찍기…", "Capture Scrolling Screenshot…"),
+            action: #selector(captureScrollingScreenshot(_:)), keyEquivalent: "")
+        scrollCaptureItem.target = self
+        menu.addItem(scrollCaptureItem)
         menu.addItem(.separator())
 
         if destinationItem.submenu == nil {
@@ -819,6 +863,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func captureScreenshot(_ sender: Any?) {
         var arguments = ["--capture"]
+        if let lastExternalFront { arguments += ["--assume-front", lastExternalFront] }
+        launchSibling(arguments: arguments, activates: false)
+    }
+
+    @objc private func captureScrollingScreenshot(_ sender: Any?) {
+        var arguments = ["--scroll"]
         if let lastExternalFront { arguments += ["--assume-front", lastExternalFront] }
         launchSibling(arguments: arguments, activates: false)
     }
@@ -1194,6 +1244,7 @@ func postPasteShortcut(to app: NSRunningApplication) -> Bool {
     return true
 }
 
+
 if selfTest {
     let r = effectiveRoute()
     log("dir:            \(screenshotFolder())")
@@ -1212,6 +1263,17 @@ if selfTest {
         log("would paste as: \(r.mode) into \(destinationDisplayName(bundleID: id))")
     } else {
         log("would paste as: \(r.mode) (clipboard only)")
+    }
+    exit(0)
+}
+
+// The window IDs --window accepts, in the same front-to-back order the picker
+// hit-tests. Titles are only populated once Screen Recording is granted.
+if listWindows {
+    for window in onScreenWindows(excluding: getpid()) {
+        let b = window.displayBounds
+        log(String(format: "%8u  %5.0fx%-5.0f at %5.0f,%-5.0f  %@",
+                   window.id, b.width, b.height, b.origin.x, b.origin.y, window.label))
     }
     exit(0)
 }
@@ -1286,19 +1348,241 @@ while fm.fileExists(atPath: savePath) {
     serial += 1
 }
 
-let proc = Process()
-proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-proc.arguments = ["-i", savePath]
-do { try proc.run() } catch { fail("cannot run screencapture: \(error)") }
+// What a scrolling capture puts on the clipboard, decided by the scrollOcrMode
+// preference. A stitched page is routinely 30,000+ px tall, and Claude
+// downscales image input to 2576 px on the long edge — the picture alone
+// arrives unreadable, so the recognized text is the part that carries the
+// content. Set inside the scroll block, consumed by the clipboard/paste
+// pipeline at the bottom of the file; nil for ordinary region captures.
+//
+//   scrollClipboardText  — replaces the image on the clipboard (textOnly/auto)
+//   scrollFollowUpText   — pasted as a second ⌘V after the image (doublePaste)
+var scrollClipboardText: String?
+var scrollFollowUpText: String?
+/// A bounded copy of the capture for the clipboard, when the full-resolution one
+/// is too large to hand another app. The saved PNG is always the full one.
+var scrollClipboardImagePath: String?
 
-let watchdog = DispatchWorkItem { proc.terminate() }
-DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
-proc.waitUntilExit()
-watchdog.cancel()
+// Whether a finished scrolling capture announces itself. On by default: the run
+// takes tens of seconds with nothing on screen after the overlay closes, so
+// silence is indistinguishable from a capture that died. Turn off with:
+//   defaults write space.techjuicelab.aishot scrollNotify -bool false
+func scrollNotifyEnabled() -> Bool {
+    guard let value = CFPreferencesCopyAppValue("scrollNotify" as CFString,
+                                                "space.techjuicelab.aishot" as CFString)
+    else { return true }
+    return (value as? Bool) ?? true
+}
 
-guard fm.fileExists(atPath: savePath) else {
-    log("nothing captured (screencapture exit \(proc.terminationStatus)) — Esc pressed, or capture failed")
-    exit(0)
+// off | sidecar | doublePaste | textOnly | auto — how a scrolling capture's
+// OCR text is delivered. Change with:
+//   defaults write space.techjuicelab.aishot scrollOcrMode doublePaste
+func storedScrollOcrMode() -> String {
+    let raw = CFPreferencesCopyAppValue("scrollOcrMode" as CFString,
+                                        "space.techjuicelab.aishot" as CFString) as? String
+    let known = ["off", "sidecar", "doublePaste", "textOnly", "auto"]
+    // Off by default: a scrolling capture is first of all a screenshot, and
+    // recognition is the slowest part of the run by a wide margin — on a
+    // 16,000-px page it costs more time than the capture itself. The modes that
+    // send text are there for the case that motivated them, which is handing a
+    // long page to a model: Claude scales image input to 2576 px on the long
+    // edge, so a tall capture's body text arrives illegible and only the
+    // recognized text carries the content. Turn it on when that is the job.
+    guard let raw, known.contains(raw) else { return "off" }
+    return raw
+}
+
+// Two ways to produce the PNG at savePath: screencapture(1) for the interactive
+// region shot, or the scrolling engine, which drives a window itself. From here
+// on the two are indistinguishable — save, clipboard, routing and ⌘V are shared.
+if scrollMode {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+
+    let maxFrames: Int = {
+        let raw = CFPreferencesCopyAppValue("scrollMaxFrames" as CFString,
+                                            "space.techjuicelab.aishot" as CFString)
+        // `defaults write … 8` stores a string while `defaults write … -int 8`
+        // stores a number, and the two are indistinguishable to the user typing
+        // the command. Reading only one of them fails silently back to the
+        // default, which looks like the setting being ignored.
+        let stored = (raw as? Int) ?? (raw as? String).flatMap(Int.init)
+        guard let stored, stored >= 2 else { return ScrollTuning.defaultMaxFrames }
+        return min(stored, 400)
+    }()
+
+    // A failed scrolling capture has to say so on screen. The region capture can
+    // stay silent because Esc-to-cancel looks the same as a failure and the user
+    // just pressed it; here the user picked a window and waited, so silence
+    // reads as the app being broken.
+    func reportFailure(_ message: String) -> Never {
+        log("scrolling capture failed: \(message)")
+        // --scroll-debug is a diagnostic run, usually scripted and often
+        // repeated: the trace is the output, and a modal alert per attempt is
+        // just something to dismiss.
+        if scrollDebugDir != nil { exit(0) }
+        // A distinct sound before the modal: the failure is often noticed by ear
+        // first, since the user has looked away during a long capture.
+        if scrollNotifyEnabled() { playSound(atPath: "/System/Library/Sounds/Basso.aiff") }
+        let alert = NSAlert()
+        alert.messageText = t("스크롤 캡처 실패", "Scrolling capture failed")
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        app.activate()
+        alert.runModal()
+        exit(0)
+    }
+
+    // Raising the target window and posting wheel events both go through
+    // Accessibility, so without it the window never moves and the run ends with
+    // "this window did not scroll" — a confident, wrong diagnosis of a
+    // permission problem. Check before capturing and say what is actually wrong.
+    //
+    // The usual cause of a surprising denial is launching the executable
+    // directly: TCC attributes the check to the responsible process, so
+    // `AIShot.app/Contents/MacOS/AIShot` run from a terminal is judged as the
+    // terminal, not as AIShot, and AIShot's own grant does not apply.
+    guard AXIsProcessTrusted() else {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        reportFailure(t("""
+            손쉬운 사용 권한이 없어 스크롤 캡처를 할 수 없습니다. 시스템 설정 → \
+            개인정보 보호 및 보안 → 손쉬운 사용에서 AIShot을 허용하세요.
+
+            터미널에서 실행 중이라면 앱으로 실행해야 AIShot의 권한이 적용됩니다:
+            open -gnb space.techjuicelab.aishot --args --scroll
+            """, """
+            Scrolling capture needs Accessibility. Allow AIShot under System \
+            Settings → Privacy & Security → Accessibility.
+
+            If you launched the executable from a terminal, run it as an app \
+            instead so AIShot's own grant applies:
+            open -gnb space.techjuicelab.aishot --args --scroll
+            """))
+    }
+
+    let onProgress: (Int) -> Void = { count in
+        if count % 5 == 0 { log("scrolling capture: \(count) frames so far") }
+    }
+
+    // --window addresses a window directly, which is what makes this scriptable
+    // and testable; without it the user points at one.
+    if let debugDirectory = scrollDebugDir {
+        try? fm.createDirectory(atPath: debugDirectory, withIntermediateDirectories: true)
+    }
+
+    let attempt: Result<ScrollCaptureOutcome, ScrollCaptureError>?
+    if let requested = scrollWindowID {
+        guard let target = onScreenWindows(excluding: getpid()).first(where: { $0.id == requested }) else {
+            reportFailure(t("화면에 창 ID \(requested)가 없습니다. --list-windows로 확인하세요.",
+                            "No on-screen window with ID \(requested) — check --list-windows."))
+        }
+        attempt = runScrollCapture(window: target, maxFrames: maxFrames,
+                                   debugDirectory: scrollDebugDir, progress: onProgress)
+    } else {
+        attempt = pickAndScrollCapture(maxFrames: maxFrames,
+                                       debugDirectory: scrollDebugDir, progress: onProgress)
+    }
+
+    guard let outcome = attempt else {
+        log("scrolling capture cancelled")
+        exit(0)
+    }
+
+    switch outcome {
+    case .failure(.didNotScroll):
+        reportFailure(t("이 창은 스크롤되지 않았습니다. 스크롤할 내용이 있는 창인지, 손쉬운 사용 권한이 허용돼 있는지 확인하세요.",
+                        "That window did not scroll. Check that it has scrollable content and that Accessibility is granted."))
+    case .failure(.windowUnavailable):
+        reportFailure(t("창을 캡처할 수 없습니다. 창이 닫혔거나 화면에서 벗어났을 수 있습니다.",
+                        "That window could not be captured — it may have closed or moved off screen."))
+    case .failure(let error):
+        reportFailure(t("캡처에 실패했습니다 (\(error)).", "Capture failed (\(error))."))
+    case .success(let result):
+        guard writePNG(result.image, to: savePath) else { fail("could not write \(savePath)") }
+        log("scrolling capture: \(result.frameCount) frames → \(result.image.width)×\(result.image.height)")
+        if let warning = result.warning { log("scrolling capture warning: \(warning)") }
+
+        let ocrMode = storedScrollOcrMode()
+        if ocrMode != "off" {
+            let text = recognizeText(in: result.image) { done, total in
+                if done % 4 == 0 || done == total { log("ocr: tile \(done)/\(total)") }
+            }
+            if text.isEmpty {
+                log("ocr: no text recognized — delivering the image only")
+            } else {
+                // The text always lands next to the PNG, whatever the delivery
+                // mode: the file is the durable copy, the clipboard is transient.
+                let textPath = (savePath as NSString).deletingPathExtension + ".txt"
+                try? text.write(toFile: textPath, atomically: true, encoding: .utf8)
+                log("ocr: \(text.count) chars → \(textPath)")
+
+                // Claude keeps image input under 2576 px on the long edge; past
+                // roughly three times that, body text has shrunk below
+                // legibility and the image is only good for layout.
+                let unreadablyTall = result.image.height > 8000
+                switch ocrMode {
+                case "textOnly":
+                    scrollClipboardText = text
+                case "auto" where unreadablyTall:
+                    log("ocr: \(result.image.height) px tall — sending text instead of the image")
+                    scrollClipboardText = text
+                case "auto", "doublePaste":
+                    scrollFollowUpText = text
+                default:
+                    break // sidecar: the .txt beside the PNG is the delivery
+                }
+            }
+        }
+
+        // Bound what goes on the clipboard — but only when an image is going
+        // there at all, since the text modes make the copy dead weight. A
+        // full-page capture reaches hundreds of megapixels, and handing that to
+        // another app is not merely wasteful: a 267-megapixel capture
+        // terminated TextEdit on the paste. The file keeps every pixel.
+        if scrollClipboardText == nil,
+           let bounded = downscaled(result.image, maxPixels: 40_000_000) {
+            // Kept out of the screenshot folder: this copy exists only to be
+            // handed to another app, and leaving it beside the real capture
+            // would put two files in the user's folder for every shot.
+            let boundedPath = NSTemporaryDirectory()
+                + "space.techjuicelab.aishot.clipboard.\(getpid()).png"
+            if writePNG(bounded, to: boundedPath) {
+                scrollClipboardImagePath = boundedPath
+                log("clipboard copy scaled to \(bounded.width)×\(bounded.height) — full size kept on disk")
+            }
+        }
+
+        // Announce the finish. The capture is done and saved at this point; the
+        // clipboard and paste that follow are near-instant and log for
+        // themselves, so this is the moment worth telling the user about.
+        if scrollNotifyEnabled() {
+            playCompletionChime()
+            let size = "\(result.image.width)×\(result.image.height)"
+            let file = (savePath as NSString).lastPathComponent
+            postNotificationIfAllowed(
+                title: t("스크롤 캡처 완료", "Scrolling capture complete"),
+                body: t("\(result.frameCount)개 프레임 · \(size)\n\(file)",
+                        "\(result.frameCount) frames · \(size)\n\(file)"))
+            showHUD(t("✓  스크롤 캡처 완료 — \(result.frameCount)개 프레임 · \(size)",
+                      "✓  Scrolling capture complete — \(result.frameCount) frames · \(size)"))
+        }
+    }
+} else {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+    proc.arguments = ["-i", savePath]
+    do { try proc.run() } catch { fail("cannot run screencapture: \(error)") }
+
+    let watchdog = DispatchWorkItem { proc.terminate() }
+    DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
+    proc.waitUntilExit()
+    watchdog.cancel()
+
+    guard fm.fileExists(atPath: savePath) else {
+        log("nothing captured (screencapture exit \(proc.terminationStatus)) — Esc pressed, or capture failed")
+        exit(0)
+    }
 }
 
 // screencapture can report completion just before WindowServer restores focus
@@ -1325,16 +1609,33 @@ let route = effectiveRoute()
 let pasteMode = route.mode
 let pb = NSPasteboard.general
 
+// What is actually being delivered, for the log. A scrolling capture in
+// textOnly — or auto on a page too tall to stay legible — sends recognized text
+// even though the route's paste mode still says "image".
+let deliveredKind = scrollClipboardText != nil ? "ocr text" : pasteMode
+
 @discardableResult
 func copyCaptureToPasteboard() -> Int {
     pb.clearContents()
     if pasteMode == "path" {
         pb.setString(shellEscape(savePath) + " ", forType: .string)
+    } else if let text = scrollClipboardText {
+        // textOnly / auto-tall scrolling capture: the recognized text stands in
+        // for an image the destination model could not have read anyway.
+        pb.setString(text, forType: .string)
     } else {
         let item = NSPasteboardItem()
-        if let png = fm.contents(atPath: savePath) {
+        // The image bytes may come from a bounded copy; the file URL always
+        // points at the full-resolution capture, so anything resolving the
+        // reference rather than the data still gets everything.
+        if let png = fm.contents(atPath: scrollClipboardImagePath ?? savePath) {
             item.setData(png, forType: .png)
-            if let tiff = NSImage(data: png)?.tiffRepresentation {
+            // The TIFF flavor exists for picky receivers, but it is uncompressed
+            // — a stitched full-page capture decodes to a gigabyte-class buffer
+            // that the pasteboard server refuses, and the failed set aborts
+            // nothing while wasting seconds. PNG + file URL cover every
+            // destination we route to, so past a sane size TIFF is skipped.
+            if png.count < 24_000_000, let tiff = NSImage(data: png)?.tiffRepresentation {
                 item.setData(tiff, forType: .tiff)
             }
         }
@@ -1344,11 +1645,36 @@ func copyCaptureToPasteboard() -> Int {
     return pb.changeCount
 }
 
+/// Second ⌘V of a doublePaste scrolling capture: the image is already in the
+/// destination's composer; swap the clipboard to the recognized text and paste
+/// again so the content arrives readable next to the layout.
+func pasteFollowUpText(_ text: String, into dest: NSRunningApplication) {
+    // Let the destination finish ingesting the image paste before the clipboard
+    // changes under it. Reading the pasteboard is asynchronous in Electron apps
+    // like Claude, and swapping too early turns the *first* paste into text —
+    // the user would get the OCR twice and no picture. Scale the wait with the
+    // payload, because a stitched full-page capture is tens of megabytes and
+    // takes proportionally longer to decode than an ordinary screenshot.
+    let megabytes = Double((try? fm.attributesOfItem(atPath: savePath)[.size] as? Int)
+        .flatMap { $0 } ?? 0) / 1_000_000
+    let settle = min(3.0, 0.7 + megabytes * 0.04)
+    log(String(format: "waiting %.1fs for the image paste to land before the text", settle))
+    usleep(useconds_t(settle * 1_000_000))
+    pb.clearContents()
+    pb.setString(text, forType: .string)
+    usleep(120_000)
+    if postPasteShortcut(to: dest) {
+        log("pasted ocr text after the image (doublePaste)")
+    } else {
+        log("could not deliver the ocr text paste — it stays on the clipboard")
+    }
+}
+
 // MARK: - paste
 
 guard route.autoPaste else {
     copyCaptureToPasteboard()
-    log("copied \(pasteMode) to clipboard — paste with ⌘V")
+    log("copied \(deliveredKind) to clipboard — paste with ⌘V")
     log("saved \(savePath)")
     exit(0)
 }
@@ -1370,7 +1696,7 @@ if destination == nil, let bundleID = route.bundleID, let launchURL = route.laun
 
 guard let dest = destination else {
     copyCaptureToPasteboard()
-    log("destination is unavailable — copied \(pasteMode) to clipboard")
+    log("destination is unavailable — copied \(deliveredKind) to clipboard")
     log("saved \(savePath)")
     exit(0)
 }
@@ -1435,10 +1761,17 @@ guard postPasteShortcut(to: dest) else {
 }
 let targetName = dest.localizedName ?? dest.bundleIdentifier ?? "?"
 if destinationIsFrontmost {
-    log("pasted \(pasteMode) into \(targetName)")
+    log("pasted \(deliveredKind) into \(targetName)")
 } else {
-    log("sent \(pasteMode) paste directly to \(targetName) after focus moved away")
+    log("sent \(deliveredKind) paste directly to \(targetName) after focus moved away")
 }
+// doublePaste only makes sense on top of an image paste — in path mode the
+// destination is a terminal that got the file path, and the sidecar .txt sits
+// next to the PNG for anything that wants the text.
+if let followUp = scrollFollowUpText, pasteMode == "image" {
+    pasteFollowUpText(followUp, into: dest)
+}
+
 if returnFocus, let front, front.processIdentifier != dest.processIdentifier {
     usleep(500_000) // let the app ingest the paste before it loses focus
     front.activate(options: [.activateAllWindows])

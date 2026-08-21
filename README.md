@@ -47,6 +47,74 @@ AIShot separates control from capture: one lightweight **menu bar host** stays
 available for destination changes, while every capture runs in its own
 short-lived process and exits as soon as the save/paste handoff is complete.
 
+## Scrolling capture — a whole window in one image
+
+Press <kbd>⌘⇧6</kbd> and the screen dims with the window under the cursor
+highlighted. Click the one you want (<kbd>Esc</kbd> cancels) and AIShot rewinds
+it to the top, scrolls to the bottom while photographing it, and matches the
+overlaps into **a single tall PNG**. The result is saved and routed to your
+destination exactly like any other capture.
+
+This is not browser-only — **anything that scrolls generally works**: Safari,
+Chrome, Firefox, native apps. Because nothing outside a window can read its
+scroll position, the seam is found by matching pixels, which leaves two limits:
+
+- **Horizontally pinned sidebars** (Wikipedia's table of contents, say) repeat
+  down the page. The content is complete; the margins carry echoes.
+- Playing video or an infinite-scroll feed can stop the capture early when no
+  seam can be justified. Everything up to that point is still exact.
+
+### Knowing it finished
+
+The capture opens with the same shutter macOS plays for its own screenshots, and
+closes with a short chime and a panel near the top of the screen —
+`✓ Scrolling capture complete — 4 frames · 2560×2027` — that fades after a couple
+of seconds. A scrolling capture can run for tens of seconds with nothing on
+screen, and without a signal there is no way to tell a finished one from a stuck
+one. Failures get a different sound and a window explaining why.
+
+A Notification Center banner is posted too when permission exists. macOS often
+withholds it from a locally-signed build of AIShot, so the on-screen panel is the
+signal that actually arrives.
+
+```sh
+defaults write space.techjuicelab.aishot scrollNotify -bool false   # silence it
+```
+
+### Text recognition — off by default
+
+Out of the box this is a screenshot and nothing more: a full-resolution PNG,
+saved and copied. No recognition runs, because on a long page it costs more time
+than the capture did.
+
+There is one reason to turn it on, and it is a good one. A stitched page
+routinely passes 30,000 px tall, and **Claude scales image input down to 2576 px
+on the long edge** — send the picture alone and the body text arrives too small
+to read. If handing long pages to a model is the job, switch **Settings → Scroll
+OCR** on and macOS Vision extracts the text to travel with the image: the image
+carries the layout, the text carries the content. Korean and English together,
+no network and no API key.
+
+| Value | Behavior |
+|---|---|
+| `off` (default) | no recognition; fastest |
+| `sidecar` | paste the image only; write the text to a `.txt` beside the PNG |
+| `doublePaste` | paste the image, swap the clipboard to the text, paste again |
+| `textOnly` | paste the text only |
+| `auto` | both while the image stays legible, text alone past 8000 px tall |
+
+With recognition on, the text is always written to the `.txt` as well — the
+clipboard is transient, the file is not. **The PNG is saved at full resolution
+under every setting**; what these change is only what reaches the clipboard.
+
+```sh
+defaults write space.techjuicelab.aishot scrollOcrMode doublePaste   # default off
+defaults write space.techjuicelab.aishot scrollMaxFrames -int 120   # default 60
+```
+
+`scrollMaxFrames` is the stop that keeps an infinite-scroll page from running
+forever.
+
 ## Menu bar
 
 `build.sh` installs and starts a single menu bar host, then registers it as a
@@ -55,6 +123,8 @@ for:
 
 - **Capture Screenshot…** — starts the same one-shot interactive capture as
   the hotkey.
+- **Capture Scrolling Screenshot…** — pick a window and capture all of it as
+  one stitched image.
 - **Destination: _current app_** — quickly switch between **Automatic
   (Frontmost App)** and installed presets. The current choice has a checkmark;
   **More Destinations in Settings…** opens the full picker.
@@ -76,23 +146,6 @@ Open **AIShot menu bar → Settings…**. Choose a preset such as Claude,
 Antigravity, ChatGPT, Codex, or Gemini, or pick any installed `.app` with
 **Choose Other…**. Once a destination is set, **every capture goes there
 regardless of which app was frontmost**.
-
-The same panel lets you choose:
-
-- **Paste as**: **Automatic** picks a file path for known terminal/IDE apps
-  and a PNG for other destinations; choose **PNG image** or **File path** to
-  force that format, including while the destination is Automatic.
-- **Open the destination app when it is not running**: on by default. AIShot
-  launches the configured app, brings it forward, and pastes. If the app
-  cannot be opened or activated, no ⌘V is sent and the capture remains on
-  the clipboard (the PNG file is still saved).
-- **Return to the previous app after pasting**: off by default, so focus stays
-  in the destination and you can immediately type your prompt.
-- **Automatic (frontmost app)** as the destination: keeps the
-  original routing behavior. With Paste as **Automatic**, known
-  terminals/IDEs receive a path, known AI apps/browsers receive the PNG, and
-  unsupported apps get clipboard-only.
-
 ### Advanced: CLI and `defaults`
 
 The menu bar is the normal way to configure AIShot. For scripts or dotfiles,
@@ -119,7 +172,8 @@ defaults delete space.techjuicelab.aishot targetApp
 Destination aliases: `claude` · `codex` · `chatgpt` · `gemini` ·
 `antigravity` · `antigravity-ide` · `cursor` · `vscode` · `safari` ·
 `chrome`. Any other app can be selected in the picker or specified by bundle
-ID (`osascript -e 'id of app "SomeApp"'`).
+ID
+(`osascript -e 'id of app "SomeApp"'`).
 
 You can also bind a hotkey that sends that run to one specific app regardless
 of focus. `--target` beats the stored destination for that run:
@@ -215,9 +269,15 @@ Karabiner rules continue to work unchanged.
   ```
 
   then enable the "AIShot" rule in Karabiner-Elements → Complex
-  Modifications → Add predefined rule. Ships as <kbd>⌘⇧2</kbd> — right next
-  to the system's ⌘⇧3/4/5 screenshot family. A **both-<kbd>⇧</kbd>-keys-at-once**
-  rule (Codex-style) is included too — enable it as well if you like.
+  Modifications → Add predefined rule. Ships as <kbd>⌘⇧2</kbd> for a region and
+  <kbd>⌘⇧6</kbd> for a scrolling capture — right next to the system's ⌘⇧3/4/5
+  screenshot family. A **both-<kbd>⇧</kbd>-keys-at-once** rule (Codex-style) is
+  included too — enable it as well if you like.
+
+  <kbd>⌘⇧6</kbd> is the slot macOS reserves for capturing the Touch Bar, but
+  Karabiner intercepts below the system hotkey layer so the two never meet. If
+  you move the binding to Raycast, Alfred or Shortcuts.app, turn the Touch Bar
+  entry off under System Settings → Keyboard → Keyboard Shortcuts → Screenshots.
 - **Alfred / Raycast / Shortcuts.app**: point a hotkey at the same `open` command.
 
 ## First-run permissions (one-time)
@@ -251,6 +311,10 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | Flag | Description | Default |
 |---|---|---|
 | `--capture` | run one interactive capture and exit (explicit alias for no arguments) | no-argument behavior |
+| `--scroll` | pick a window and capture it top to bottom as one image | — |
+| `--window ID` | scroll-capture this window, skipping the picker (for scripts) | — |
+| `--list-windows` | print the window IDs `--window` accepts | — |
+| `--scroll-debug DIR` | write every raw frame to DIR and trace the run | — |
 | `--menubar` | run the singleton resident menu host until **Quit AIShot** | installed LaunchAgent uses this |
 | `--mode auto\|path\|image` | force the paste format instead of auto-detecting | `auto` |
 | `--target alias\|bundle-id` | send this run's shot to that app unconditionally (beats the stored destination) | — |
