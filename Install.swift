@@ -355,9 +355,14 @@ enum Install {
     /// installs in silence and then throws a capture crosshair over whatever the
     /// user was doing, which reads as a bug rather than as an installed app.
     private static func announceInstall() {
+        // .accessory, not .regular: this is an LSUIElement app, and switching it
+        // to a policy it was not launched under leaves the alert with a window
+        // the window server never puts on screen — the process blocks in
+        // runModal against nothing the user can see. The settings panel has
+        // always used .accessory for the same reason.
         let app = NSApplication.shared
-        app.setActivationPolicy(.regular)
-        app.activate(ignoringOtherApps: true)
+        app.setActivationPolicy(.accessory)
+        app.activate()
         let alert = NSAlert()
         alert.messageText = t("AIShot 설치 완료", "AIShot is installed")
         alert.informativeText = t(
