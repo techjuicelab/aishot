@@ -226,6 +226,8 @@ var listWindows = false // --list-windows: print the IDs --window accepts
 var scrollDebugDir: String? // --scroll-debug DIR: dump every raw frame and trace the run
 var targetRaw: String? // --target alias|bundle-id: force the destination for this run
 var assumeFrontRaw: String? // --assume-front bundle-id: the app the menu host saw
+var installOnly = false // --install: wire this copy up and exit, installing nothing else
+var announceInstall = false // --announce: confirm a GUI first run with an alert
 
 var argIt = CommandLine.arguments.dropFirst().makeIterator()
 while let arg = argIt.next() {
@@ -264,6 +266,8 @@ while let arg = argIt.next() {
         guard let value = argIt.next() else { fail("--scroll-debug requires a directory") }
         scrollDebugDir = value
         scrollMode = true
+    case "--install":    installOnly = true
+    case "--announce":   announceInstall = true
     case "--capture":    break // explicit alias for the default one-shot capture mode
     default:             fail("unknown flag: \(arg)")
     }
@@ -322,6 +326,33 @@ func claimMenuBarRelaunchMarker() -> Bool {
 if !showMenuBar, CommandLine.arguments.count == 1, claimMenuBarRelaunchMarker() {
     showMenuBar = true
     log("relaunched by the updater — starting the menu bar host, not a capture")
+}
+
+// MARK: - installation
+
+// Installing is the app's own job, so that a copy dragged out of a DMG, one
+// unzipped by an install script and one built from source all end up wired the
+// same way: a single registered bundle in /Applications and a LaunchAgent
+// pointing at it. `--install` is the scripted entry point that build.sh and
+// mac-setup use; a GUI first run does the same thing on its own and says so.
+if installOnly {
+    exit(Install.run(announce: announceInstall) ? 0 : 1)
+}
+// Diagnostic and utility runs are deliberately left out: --self-test or
+// --list-windows against a build tree should report on that build tree, not
+// quietly relocate the app to /Applications.
+let mayAutoInstall = !showMenuBar && !selfTest && !listWindows && !chooseDir && !showSettings
+if mayAutoInstall, Install.needsInstall() {
+    if Install.needsRelocation() {
+        // The copy that finishes the job is the one at the install location, and
+        // it is the one that should be running afterwards — this process runs
+        // out of a bundle that is about to be superseded, ejected or cleaned
+        // away, so there is nothing sensible to continue with here.
+        exit(Install.run(announce: true) ? 0 : 1)
+    }
+    // Already in the right place with only the LaunchAgent missing: wire it up
+    // and carry on with whatever this run was asked to do.
+    Install.run(announce: false)
 }
 
 // MARK: - environment
@@ -1029,6 +1060,12 @@ if showMenuBar {
         log("menu bar is already running")
         exit(0)
     }
+    // The host starts once per login and once per applied update, which makes it
+    // the right place to notice that an update swapped a locally built, ad-hoc
+    // signed copy for a release-signed one. Nothing else in the app would see
+    // that transition, and macOS would go on showing permissions as granted
+    // while silently refusing them.
+    Install.reconcileSigningIdentity(verbose: false)
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let delegate = MenuBarAppDelegate(hostLockFD: hostLockFD) // NSApp.delegate is weak

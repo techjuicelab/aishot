@@ -2,28 +2,34 @@
 # Build AIShot.app (universal, locally signed, no dependencies) and install it
 # into /Applications, like any other Mac app, so launchers can start it by
 # name: open -gna AIShot
+#
+#   ./build.sh               build, then install and start the menu bar host
+#   ./build.sh --no-install  build only, leaving ./AIShot.app in the tree
+#                            (what release.sh packages into the zip and dmg)
+#
+# The install half is the app's own `--install`, so a build tree, a downloaded
+# zip and a dragged-out DMG all produce the same installed state. Override the
+# destination with AISHOT_INSTALL_DIR=~/Applications ./build.sh — build.sh only
+# passes it through; Install.swift is what acts on it.
 set -e
 cd "$(dirname "$0")"
 
 APP=AIShot.app
 BIN="$APP/Contents/MacOS/AIShot"
-MENUBAR_LABEL=space.techjuicelab.aishot.menubar
-MENUBAR_PLIST="$HOME/Library/LaunchAgents/$MENUBAR_LABEL.plist"
 
-# /Applications is the expected home for an app and is group-writable for
-# admin users, so no sudo is needed on a normal Mac. Fall back to ~/Applications
-# on a managed machine where it is locked down. Override with:
-#   AISHOT_INSTALL_DIR=~/Applications ./build.sh
-INSTALL_DIR="${AISHOT_INSTALL_DIR:-}"
-if [ -z "$INSTALL_DIR" ]; then
-  if [ -w /Applications ]; then
-    INSTALL_DIR=/Applications
-  else
-    INSTALL_DIR="$HOME/Applications"
-  fi
-fi
-INSTALL_DIR="${INSTALL_DIR%/}"
-INSTALLED="$INSTALL_DIR/$APP"
+# The released version. release.sh rewrites both lines when it cuts a release;
+# nothing else should edit them, since VERSION is what the appcast advertises
+# and BUILD is what Sparkle compares.
+VERSION=1.6
+BUILD=9
+
+NO_INSTALL=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-install) NO_INSTALL=1 ;;
+    *) echo "usage: build.sh [--no-install]" >&2; exit 2 ;;
+  esac
+done
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
@@ -111,13 +117,13 @@ fi
 # Universal binary (Apple Silicon + Intel), deployment target macOS 14.
 # main.swift must stay in the list: swiftc picks the entry point by that name,
 # and every other file is a plain declaration-only source compiled alongside it.
-SOURCES=(main.swift ScrollCapture.swift)
+SOURCES=(main.swift ScrollCapture.swift Install.swift)
 swiftc -O -target arm64-apple-macos14.0  "${SPARKLE_FLAGS[@]}" -o /tmp/aishot-arm64  "${SOURCES[@]}"
 swiftc -O -target x86_64-apple-macos14.0 "${SPARKLE_FLAGS[@]}" -o /tmp/aishot-x86_64 "${SOURCES[@]}"
 lipo -create /tmp/aishot-arm64 /tmp/aishot-x86_64 -output "$BIN"
 rm -f /tmp/aishot-arm64 /tmp/aishot-x86_64
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -126,8 +132,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleIdentifier</key><string>space.techjuicelab.aishot</string>
 	<key>CFBundleName</key><string>AIShot</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>1.6</string>
-	<key>CFBundleVersion</key><string>9</string>
+	<key>CFBundleShortVersionString</key><string>$VERSION</string>
+	<key>CFBundleVersion</key><string>$BUILD</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSMinimumSystemVersion</key><string>14.0</string>
 	<key>LSUIElement</key><true/>
@@ -186,141 +192,23 @@ if [ -d "$APP/Contents/Frameworks/Sparkle.framework" ]; then
 fi
 codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP"
 
-# Install and register with LaunchServices
-NEW_REQUIREMENT=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^.*designated => //p')
-OLD_REQUIREMENT=$(codesign -d -r- "$INSTALLED" 2>&1 | sed -n 's/^.*designated => //p')
-if [ -z "$NEW_REQUIREMENT" ]; then
-  echo "error:     could not read the new app's signing requirement"
-  exit 1
-fi
-if [ -e "$INSTALLED" ] && [ -z "$OLD_REQUIREMENT" ]; then
-  # Never treat an unreadable installed signature as an identity match.
-  OLD_REQUIREMENT="<unreadable-installed-requirement>"
+# Installing is the app's own job (Install.swift): the same code runs whether
+# the bundle arrived from this build tree, from a downloaded zip or from a DMG,
+# so there is exactly one description of what an installed AIShot looks like —
+# a single registered copy in /Applications and a LaunchAgent pointing at it.
+# build.sh only decides *whether* to install.
+if [ "$NO_INSTALL" = "1" ]; then
+  echo "built:     $PWD/$APP (not installed — --no-install)"
+  exit 0
 fi
 
-# Retire the pre-1.4 bundle ID. Its agent would keep restarting a host whose
-# status item macOS refuses to place in the menu bar, and both hosts would
-# fight over the same lock.
-LEGACY_LABEL=com.techjuicelab.aishot.menubar
-LEGACY_PLIST="$HOME/Library/LaunchAgents/$LEGACY_LABEL.plist"
-if [ -e "$LEGACY_PLIST" ] || launchctl print "gui/$UID/$LEGACY_LABEL" >/dev/null 2>&1; then
-  launchctl bootout "gui/$UID/$LEGACY_LABEL" >/dev/null 2>&1 || true
-  rm -f "$LEGACY_PLIST"
-  pkill -f "AIShot --menubar" >/dev/null 2>&1 || true
-  echo "cleanup:   retired the com.techjuicelab.aishot menu bar agent"
-fi
+"$BIN" --install
 
-# Stop the previously installed resident host only after the new build has
-# succeeded. Captures are separate short-lived processes and are left alone.
-launchctl bootout "gui/$UID/$MENUBAR_LABEL" >/dev/null 2>&1 || true
-for _ in {1..40}; do
-  launchctl print "gui/$UID/$MENUBAR_LABEL" >/dev/null 2>&1 || break
-  sleep 0.05
-done
-if launchctl print "gui/$UID/$MENUBAR_LABEL" >/dev/null 2>&1; then
-  echo "error:     previous menu bar LaunchAgent did not stop"
-  exit 1
-fi
-
-# Any host still running from a previous install — at either location.
-while read -r process_pid process_command; do
-  if [[ "$process_command" == *"/$APP/Contents/MacOS/AIShot --menubar" ]]; then
-    kill "$process_pid" >/dev/null 2>&1 || true
-    for _ in {1..20}; do
-      kill -0 "$process_pid" >/dev/null 2>&1 || break
-      sleep 0.05
-    done
-    if kill -0 "$process_pid" >/dev/null 2>&1; then
-      echo "error:     previous manual menu bar host did not stop"
-      exit 1
-    fi
-  fi
-done < <(ps ax -o pid=,command=)
-
-mkdir -p "$INSTALL_DIR"
-rm -rf "$INSTALLED"
-ditto "$APP" "$INSTALLED"
+# The build-tree bundle has served its purpose, and two bundles sharing a bundle
+# ID make `open -a AIShot`, the TCC identity and the menu bar item all resolve
+# ambiguously. Unregister and drop this one now that the installed copy is live.
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-[ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$INSTALLED" || true
-
-# Keep exactly one registered copy: two bundles sharing a bundle ID make
-# `open -a AIShot`, the TCC identity and the menu bar item resolve ambiguously.
-# Drop the build-tree bundle and any copy left at the other install location.
 [ -x "$LSREGISTER" ] && "$LSREGISTER" -f -u "$PWD/$APP" || true
 rm -rf "$APP"
-for other in /Applications "$HOME/Applications"; do
-  [ "$other" = "$INSTALL_DIR" ] && continue
-  [ -e "$other/$APP" ] || continue
-  [ -x "$LSREGISTER" ] && "$LSREGISTER" -f -u "$other/$APP" || true
-  rm -rf "$other/$APP"
-  echo "cleanup:   removed the earlier install at $other/$APP"
-done
 
-# Keep a single lightweight menu-bar host available after login. The host only
-# owns the status item; each capture still runs as a short-lived app instance.
-mkdir -p "$(dirname "$MENUBAR_PLIST")"
-cat > "$MENUBAR_PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>$MENUBAR_LABEL</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>$INSTALLED/Contents/MacOS/AIShot</string>
-    <string>--menubar</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <!-- Restart the host after a crash, but not after it exits cleanly. A host
-       that dies unexpectedly must not leave the user without a menu bar item;
-       a deliberate exit must be allowed to stick. That distinction matters for
-       auto-updates: Sparkle terminates the app to swap the bundle and then
-       relaunches it itself, and a restart-on-any-exit agent would race launchd
-       against the installer over a bundle that is mid-replacement. Quit AIShot
-       additionally unloads this agent for the session. -->
-  <key>KeepAlive</key>
-  <dict><key>SuccessfulExit</key><false/></dict>
-  <key>LimitLoadToSessionType</key><string>Aqua</string>
-  <key>ProcessType</key><string>Interactive</string>
-</dict>
-</plist>
-PLIST
-plutil -lint "$MENUBAR_PLIST" >/dev/null
-if ! launchctl bootstrap "gui/$UID" "$MENUBAR_PLIST"; then
-  echo "error:     could not register the menu bar LaunchAgent"
-  exit 1
-fi
-sleep 0.25
-MENUBAR_RUNNING=0
-for _ in {1..40}; do
-  if launchctl print "gui/$UID/$MENUBAR_LABEL" 2>/dev/null \
-      | grep -q 'state = running'; then
-    MENUBAR_RUNNING=1
-    break
-  fi
-  sleep 0.05
-done
-if [ "$MENUBAR_RUNNING" -ne 1 ]; then
-  echo "error:     menu bar LaunchAgent registered but its host is not running"
-  exit 1
-fi
-
-echo "installed: $INSTALLED"
-echo "launch:    open -gn \"$INSTALLED\""
-echo "menu bar:  running now and automatically after login"
-if [ "$INSTALL_DIR" != "/Applications" ]; then
-  echo "note:      /Applications was not writable — installed to $INSTALL_DIR instead"
-fi
-
-# A changed designated requirement invalidates TCC grants while System Settings
-# can still show them enabled. Reset only on that identity transition; a stable
-# local signing certificate keeps permissions valid across later updates.
-if [ "$NEW_REQUIREMENT" != "$OLD_REQUIREMENT" ]; then
-  if tccutil reset All space.techjuicelab.aishot >/dev/null 2>&1; then
-    echo "note:      signing identity changed — permissions were reset once"
-  else
-    echo "warning:   signing identity changed but TCC reset failed; re-add AIShot permissions manually"
-  fi
-else
-  echo "note:      signing identity unchanged — existing permissions kept"
-fi
+echo "launch:    open -gnb space.techjuicelab.aishot"
