@@ -76,6 +76,7 @@ let imagePasteIDs = Set([
     "com.openai.codex",               // Codex.app
     "com.openai.chat",                // ChatGPT.app
     "com.google.GeminiMacOS",         // Gemini.app
+    "com.meta.endo",                  // Muse.app (Meta)
     "com.apple.Safari",
     "com.google.Chrome",
 ] + extraIDs("extraImageApps"))
@@ -107,6 +108,7 @@ let targetPresets = [
     TargetPreset(alias: "chatgpt", name: "ChatGPT", bundleID: "com.openai.chat"),
     TargetPreset(alias: "codex", name: "Codex", bundleID: "com.openai.codex"),
     TargetPreset(alias: "gemini", name: "Gemini", bundleID: "com.google.GeminiMacOS"),
+    TargetPreset(alias: "muse", name: "Muse", bundleID: "com.meta.endo"),
     TargetPreset(alias: "cursor", name: "Cursor", bundleID: "com.todesktop.230313mzl4w4u92"),
     TargetPreset(alias: "vscode", name: "Visual Studio Code", bundleID: "com.microsoft.VSCode"),
     TargetPreset(alias: "safari", name: "Safari", bundleID: "com.apple.Safari"),

@@ -19,10 +19,10 @@
 
 | 목적지 설정 | 모든 캡처가 가는 곳 | 붙여넣는 형식 |
 |---|---|---|
-| 특정 앱 — Claude, Antigravity, ChatGPT, Codex 또는 다른 앱 | 무엇이 최전면이었든 그 앱. 필요하면 기본적으로 AIShot이 앱을 실행 | **자동**, **PNG 이미지**, **파일 경로** 중 설정 가능 |
+| 특정 앱 — Claude, Antigravity, ChatGPT, Codex, Muse 또는 다른 앱 | 무엇이 최전면이었든 그 앱. 필요하면 기본적으로 AIShot이 앱을 실행 | **자동**, **PNG 이미지**, **파일 경로** 중 설정 가능 |
 | 터미널 — Ghostty, iTerm2, Terminal, WezTerm, kitty, Warp | 그 안에 띄워 둔 CLI 에이전트 — Claude Code, Codex CLI, Gemini CLI. 터미널이 마지막으로 포커스하고 있던 창·탭·스플릿 | 이스케이프된 **파일 경로** + 자동 ⌘V, 원하면 이어서 <kbd>Enter</kbd> |
 | 목적지 **Automatic** + 최전면 터미널·IDE — Ghostty, Terminal, iTerm2, kitty, WezTerm, Warp, VS Code, Antigravity, Cursor | 최전면 앱 | Paste as **Automatic**일 때: 이스케이프된 **파일 경로** + 자동 ⌘V |
-| 목적지 **Automatic** + 최전면 AI 앱·브라우저 — Claude, Codex, ChatGPT, Gemini, Safari, Chrome | 최전면 앱 | Paste as **Automatic**일 때: **PNG 이미지** + 자동 ⌘V |
+| 목적지 **Automatic** + 최전면 AI 앱·브라우저 — Claude, Codex, ChatGPT, Gemini, Muse, Safari, Chrome | 최전면 앱 | Paste as **Automatic**일 때: **PNG 이미지** + 자동 ⌘V |
 | 목적지 **Automatic** + 그 외 모든 앱 | 클립보드 복사만 하고 ⌘V는 보내지 않음 | Paste as **Automatic**일 때: 수동으로 붙여넣을 수 있는 **PNG 이미지** |
 
 모든 캡처는 macOS 기본 파일명(`Screenshot 2026-07-08 at 11.09.27 AM.png`)의
@@ -135,7 +135,7 @@ open -gnb space.techjuicelab.aishot --args --menubar
 ## 지정 앱 — 어디서 찍든 한 곳으로
 
 **AIShot 메뉴 막대 → Settings…**를 연다. Claude, Antigravity, ChatGPT,
-Codex, Gemini 같은 프리셋을 고르거나
+Codex, Gemini, Muse (Meta) 같은 프리셋을 고르거나
 **Choose Other…**로 설치된 어떤 `.app`이든 선택할 수 있다. 목적지를 지정하면
 **어떤 앱이 최전면이었는지와 무관하게 모든 캡처가 그곳으로 간다**.
 
@@ -201,7 +201,7 @@ defaults write space.techjuicelab.aishot pasteSubmit -bool true
 defaults delete space.techjuicelab.aishot targetApp
 ```
 
-목적지 별칭: `claude` · `codex` · `chatgpt` · `gemini` · `antigravity` ·
+목적지 별칭: `claude` · `codex` · `chatgpt` · `gemini` · `muse` · `antigravity` ·
 `antigravity-ide` · `cursor` · `vscode` · `safari` · `chrome` · `ghostty` ·
 `iterm` · `terminal` · `wezterm` · `kitty` · `warp`. 그 외 앱은
 선택창에서 고르거나 번들 ID로 지정한다
@@ -213,6 +213,9 @@ defaults delete space.techjuicelab.aishot targetApp
 ```sh
 open -gnb space.techjuicelab.aishot --args --target codex
 ```
+
+Muse로 보내려면 목적지 메뉴나 설정에서 **Muse**를 고르거나 `--target muse`를
+사용한다. 목적지가 Automatic이면 Muse가 최전면일 때 PNG 이미지를 붙여넣는다.
 
 현재 설정으로 어떻게 동작할지는 `--self-test`로 미리 확인할 수 있다.
 

@@ -19,10 +19,10 @@ to the destination you chose from the [menu bar or Settings](#menu-bar):
 
 | Destination setting | Where every capture goes | What gets pasted |
 |---|---|---|
-| A specific app — Claude, Antigravity, ChatGPT, Codex, or any other app | that app, regardless of what was frontmost; AIShot opens it when needed by default | configurable: **Automatic**, **PNG image**, or **File path** |
+| A specific app — Claude, Antigravity, ChatGPT, Codex, Muse, or any other app | that app, regardless of what was frontmost; AIShot opens it when needed by default | configurable: **Automatic**, **PNG image**, or **File path** |
 | A terminal — Ghostty, iTerm2, Terminal, WezTerm, kitty, Warp | the CLI agent you keep open there — Claude Code, Codex CLI, Gemini CLI — in whichever window, tab and split the terminal itself last had focused | escaped **file path** + auto ⌘V, optionally followed by <kbd>Return</kbd> |
 | Destination **Automatic** + a frontmost terminal or IDE — Ghostty, Terminal, iTerm2, kitty, WezTerm, Warp, VS Code, Antigravity, Cursor | the frontmost app | with Paste as **Automatic**: escaped **file path** + auto ⌘V |
-| Destination **Automatic** + a frontmost AI app or browser — Claude, Codex, ChatGPT, Gemini, Safari, Chrome | the frontmost app | with Paste as **Automatic**: the **PNG itself** + auto ⌘V |
+| Destination **Automatic** + a frontmost AI app or browser — Claude, Codex, ChatGPT, Gemini, Muse, Safari, Chrome | the frontmost app | with Paste as **Automatic**: the **PNG itself** + auto ⌘V |
 | Destination **Automatic** + anything else | clipboard only; no ⌘V is sent | with Paste as **Automatic**: the **PNG itself**, ready to paste manually |
 
 Every capture is also **saved as a file** with the native macOS naming
@@ -144,7 +144,7 @@ open -gnb space.techjuicelab.aishot --args --menubar
 ## Destination app — every shot lands in one place
 
 Open **AIShot menu bar → Settings…**. Choose a preset such as Claude,
-Antigravity, ChatGPT, Codex, or Gemini, or pick any installed `.app` with
+Antigravity, ChatGPT, Codex, Gemini, or Muse (Meta), or pick any installed `.app` with
 **Choose Other…**. Once a destination is set, **every capture goes there
 regardless of which app was frontmost**.
 
@@ -212,7 +212,7 @@ defaults write space.techjuicelab.aishot pasteSubmit -bool true
 defaults delete space.techjuicelab.aishot targetApp
 ```
 
-Destination aliases: `claude` · `codex` · `chatgpt` · `gemini` ·
+Destination aliases: `claude` · `codex` · `chatgpt` · `gemini` · `muse` ·
 `antigravity` · `antigravity-ide` · `cursor` · `vscode` · `safari` ·
 `chrome` · `ghostty` · `iterm` · `terminal` · `wezterm` · `kitty` · `warp`.
 Any other app can be selected in the picker or specified by bundle ID
@@ -224,6 +224,10 @@ of focus. `--target` beats the stored destination for that run:
 ```sh
 open -gnb space.techjuicelab.aishot --args --target codex
 ```
+
+For Muse, choose **Muse** in the destination menu or Settings, or use
+`--target muse`. In Automatic mode, captures paste as PNG images when Muse is
+frontmost.
 
 Preview what your current setup would do with `--self-test`.
 
