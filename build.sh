@@ -20,8 +20,8 @@ BIN="$APP/Contents/MacOS/AIShot"
 # The released version. release.sh rewrites both lines when it cuts a release;
 # nothing else should edit them, since VERSION is what the appcast advertises
 # and BUILD is what Sparkle compares.
-VERSION=1.10
-BUILD=13
+VERSION=1.10.1
+BUILD=14
 
 NO_INSTALL=0
 for arg in "$@"; do

@@ -237,6 +237,12 @@ enum Install {
             return false
         }
 
+        // Sparkle can relaunch a resident host with no arguments, outside the
+        // LaunchAgent. Its lock, rather than an argv suffix, identifies it.
+        let lockPath = NSTemporaryDirectory()
+            + "space.techjuicelab.aishot.\(getuid()).menubar.lock"
+        guard stopLockHoldingHost(lockPath: lockPath) else { return false }
+
         let mine = getpid()
         for line in tool("/bin/ps", ["ax", "-o", "pid=,command="]).output.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -244,15 +250,113 @@ enum Install {
                   let pid = Int32(trimmed[trimmed.startIndex..<space]), pid != mine else { continue }
             let command = String(trimmed[trimmed.index(after: space)...])
             guard command.hasSuffix("/\(appName)/Contents/MacOS/AIShot --menubar") else { continue }
-            kill(pid, SIGTERM)
-            for _ in 0..<20 {
-                if kill(pid, 0) != 0 { break }
-                usleep(50_000)
-            }
-            if kill(pid, 0) == 0 {
-                log("error:     previous manual menu bar host did not stop")
+            guard retireVerifiedHost(pid, allowNoArguments: false, operations: .live) else { return false }
+        }
+        return stopLockHoldingHost(lockPath: lockPath)
+    }
+
+    // Injectable process operations and an explicit lock path keep regression
+    // fixtures away from the user's running app and real menu bar lock.
+    struct HostProcessOperations {
+        var command: (pid_t) -> String?
+        var executablePath: (pid_t) -> String?
+        var terminate: (pid_t) -> Bool
+        var isRunning: (pid_t) -> Bool
+        var pause: () -> Void
+
+        static var live: Self {
+            Self(command: { pid in
+                let result = Install.tool("/bin/ps", ["-ww", "-p", "\(pid)", "-o", "command="])
+                return result.status == 0
+                    ? result.output.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+            }, executablePath: { pid in
+                // PROC_PIDPATHINFO_MAXSIZE is 4 * MAXPATHLEN in the SDK; the
+                // composed C macro itself is not imported into Swift.
+                var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+                guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+                return String(cString: buffer)
+            }, terminate: { Darwin.kill($0, SIGTERM) == 0 }, isRunning: { pid in
+                if Darwin.kill(pid, 0) == 0 { return true }
+                return errno != ESRCH
+            }, pause: { usleep(50_000) })
+        }
+    }
+
+    static func isResidentHostCommand(_ command: String, executablePath: String,
+                                      allowNoArguments: Bool = true) -> Bool {
+        guard executablePath.hasPrefix("/"),
+              executablePath.hasSuffix("/\(appName)/Contents/MacOS/AIShot") else { return false }
+        return command == executablePath + " --menubar"
+            || (allowNoArguments && command == executablePath)
+    }
+
+    static func lockHolderPID(lockPath: String) throws -> pid_t? {
+        let descriptor = Darwin.open(lockPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard descriptor >= 0 else {
+            if errno == ENOENT { return nil }
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        defer { Darwin.close(descriptor) }
+        var query = flock()
+        query.l_type = Int16(F_WRLCK)
+        query.l_whence = Int16(SEEK_SET)
+        guard Darwin.fcntl(descriptor, F_GETLK, &query) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        if query.l_type == Int16(F_UNLCK) { return nil }
+        guard query.l_pid > 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(EINVAL)) }
+        return query.l_pid
+    }
+
+    static func stopLockHoldingHost(lockPath: String,
+                                    operations: HostProcessOperations = .live) -> Bool {
+        do {
+            guard let holder = try lockHolderPID(lockPath: lockPath) else { return true }
+            guard holder != getpid(),
+                  let command = operations.command(holder),
+                  let executable = operations.executablePath(holder),
+                  isResidentHostCommand(command, executablePath: executable) else {
+                // A standalone --settings process can briefly own this lock.
+                // Captures and unknown holders must never be terminated.
+                log("error:     menu bar lock is held by an unverified process; leaving it running")
                 return false
             }
+            guard try lockHolderPID(lockPath: lockPath) == holder else {
+                return try lockHolderPID(lockPath: lockPath) == nil
+            }
+            guard retireVerifiedHost(holder, allowNoArguments: true, operations: operations) else { return false }
+            guard try lockHolderPID(lockPath: lockPath) == nil else {
+                log("error:     the menu bar lock is still held after stopping the previous host")
+                return false
+            }
+            return true
+        } catch {
+            log("error:     could not inspect the previous menu bar host: \(error)")
+            return false
+        }
+    }
+
+    private static func retireVerifiedHost(_ pid: pid_t, allowNoArguments: Bool,
+                                           operations: HostProcessOperations) -> Bool {
+        guard pid != getpid() else { return false }
+        guard let command = operations.command(pid),
+              let executable = operations.executablePath(pid) else { return !operations.isRunning(pid) }
+        guard isResidentHostCommand(command, executablePath: executable,
+                                    allowNoArguments: allowNoArguments) else {
+            log("error:     refusing to stop an unverified AIShot process")
+            return false
+        }
+        guard operations.terminate(pid) || !operations.isRunning(pid) else {
+            log("error:     could not stop the previous menu bar host")
+            return false
+        }
+        for _ in 0..<20 {
+            if !operations.isRunning(pid) { return true }
+            operations.pause()
+        }
+        if operations.isRunning(pid) {
+            log("error:     previous manual menu bar host did not stop")
+            return false
         }
         return true
     }
