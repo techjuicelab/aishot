@@ -13,7 +13,7 @@
 
 ---
 
-일반 스크린샷은 단축키 → 영역 드래그(<kbd>Space</kbd>로 창 선택, <kbd>Esc</kbd> 취소) → PNG가
+일반 스크린샷은 <kbd>⌘⇧2</kbd> → 영역 드래그(<kbd>Space</kbd>로 창 선택, <kbd>Esc</kbd> 취소) → PNG가
 기존 스크린샷 폴더에 저장되는 **동시에**, [메뉴 막대 또는 설정](#메뉴-막대)에서
 고른 목적지로 들어간다:
 
@@ -48,7 +48,7 @@ AIShot은 제어와 캡처를 분리한다. 가벼운 **메뉴 막대 호스트*
 
 ## 스크린샷에서 텍스트 복사
 
-메뉴 막대의 **스크린샷 텍스트 복사…**를 누르고 필요한 글자가 있는 영역을
+<kbd>⌘⇧1</kbd>을 누르거나 메뉴 막대의 **스크린샷 텍스트 복사…**를 고른 뒤 필요한 글자가 있는 영역을
 드래그하면, Apple Vision이 한국어와 영어를 인식해 **텍스트만 클립보드에 복사**한다.
 원하는 곳에서 <kbd>⌘V</kbd>로 붙여넣으면 된다. 인식은 Mac 안에서 처리하며
 네트워크 연결이나 API 키가 필요 없다.
@@ -63,7 +63,7 @@ open -gnb space.techjuicelab.aishot --args --ocr
 
 ## 스크롤 캡처 — 창 전체를 한 장으로
 
-<kbd>⌘⇧6</kbd>을 누르면 화면이 어두워지고 커서 아래 창이 밝게 표시된다. 캡처할
+<kbd>⌘⇧8</kbd>을 누르면 화면이 어두워지고 커서 아래 창이 밝게 표시된다. 캡처할
 창을 클릭하면(<kbd>Esc</kbd> 취소) AIShot이 그 창을 맨 위로 되감은 뒤 바닥까지
 스크롤하며 촬영하고, 겹치는 부분을 맞춰 **한 장의 긴 PNG**로 이어붙인다. 결과는
 일반 캡처와 똑같이 저장되고 지정한 목적지로 간다.
@@ -137,7 +137,7 @@ defaults write space.techjuicelab.aishot scrollMaxFrames -int 120   # 기본 60
   사이를 빠르게 전환. 현재 선택에는 체크 표시가 붙고,
   **More Destinations in Settings…**에서 전체 선택창을 연다.
 - **Settings…** — 어떤 앱이든 목적지로 고르고 붙여넣기 형식, 목적지 자동 실행,
-  포커스 복귀를 설정하는 기본 진입점.
+  포커스 복귀와 앱 자체 단축키를 설정하는 기본 진입점.
 - **Open Screenshot Folder** — 현재 AIShot 저장 폴더 열기.
 - **Quit AIShot** — 이번 세션의 메뉴 호스트 종료. 다음 로그인 때 LaunchAgent가
   다시 시작한다.
@@ -312,41 +312,39 @@ defaults write space.techjuicelab.aishot SUEnableAutomaticChecks -bool false
 
 ## 단축키
 
-쓰고 있는 런처 아무거나 아래 명령에 연결:
+AIShot이 메뉴 막대에서 실행 중이면 앱 자체 단축키가 동작한다. Karabiner나 별도
+런처를 설치할 필요가 없다.
+
+| 기능 | 기본 단축키 |
+|---|---|
+| 일반 스크린샷 | <kbd>⌘⇧2</kbd> |
+| 스크롤 스크린샷 | <kbd>⌘⇧8</kbd> |
+| 스크린샷 텍스트 복사 | <kbd>⌘⇧1</kbd> |
+
+**메뉴 막대 → 설정… → 단축키** 탭에서 원하는 행의 버튼을 누르고 새 조합을 입력한다.
+<kbd>Esc</kbd>는 입력 취소, 보조 키 없는 <kbd>Delete</kbd>는 해당 단축키를 **없음**으로
+설정한다. **기본값 복원**은 세 행을 기본 조합으로 되돌린다. **저장**을 눌러야 적용되며,
+**취소**하면 기존 설정을 유지한다. 중복 조합이나 macOS·다른 앱과의 충돌은 원인 행을
+표시하고 저장을 막는다.
+
+macOS가 캡처 등에 사용하는 <kbd>⌘⇧3</kbd>~<kbd>⌘⇧7</kbd>을 피해 기본 스크롤
+단축키는 <kbd>⌘⇧8</kbd>을 사용한다. 앱 자체 단축키를 등록할 수 있으면 설치 시 기존
+AIShot 기본 <kbd>⌘⇧1</kbd>/<kbd>⌘⇧2</kbd>/<kbd>⌘⇧6</kbd> Karabiner 규칙을
+백업한 뒤 해제해 중복 실행을 막는다. 백업은
+`~/Library/Application Support/AIShot/Backups/`에 저장한다.
+다른 앱의 규칙과 사용자가 바꾼 조합은 유지한다. TextShot 등에서 <kbd>⌘⇧1</kbd>을
+쓰고 있다면 앱 중 하나의 단축키를 바꾸거나 해제한다.
+
+Alfred·Raycast·단축어·Karabiner를 계속 쓰고 싶다면 다음 명령을 선택해서 연결할 수 있다.
+같은 조합을 외부 런처에 등록할 때는 AIShot의 해당 단축키를 **없음**으로 설정한다.
 
 ```sh
 open -gnb space.techjuicelab.aishot --args --capture
-```
-
-인자 없이 실행해도 같은 일회성 캡처이므로 기존 런처와 Karabiner 룰은 그대로
-동작한다.
-
-텍스트 인식·복사 전용 단축키는 다음 명령에 연결한다:
-
-```sh
+open -gnb space.techjuicelab.aishot --args --scroll
 open -gnb space.techjuicelab.aishot --args --ocr
 ```
 
-- **Karabiner-Elements**:
-
-  ```sh
-  mkdir -p ~/.config/karabiner/assets/complex_modifications
-  cp karabiner/aishot.json ~/.config/karabiner/assets/complex_modifications/
-  ```
-
-  그다음 Karabiner-Elements → Complex Modifications → Add predefined rule에서
-  "AIShot" 활성화. 기본 키는 영역 캡처 <kbd>⌘⇧2</kbd>, 스크롤 캡처
-  <kbd>⌘⇧6</kbd> — 시스템 ⌘⇧3/4/5 스크린샷 패밀리 옆자리. 텍스트 복사용
-  <kbd>⌘⇧1</kbd> 룰은 원하는 경우에만 활성화한다. TextShot에서 이미
-  <kbd>⌘⇧1</kbd>을 쓰고 있다면 두 앱의 단축키 중 하나만 활성화한다. **양쪽
-  <kbd>⇧</kbd> 동시 누르기** 룰(Codex 스타일)도 같이 들어 있으니 원하면 추가로
-  활성화.
-
-  <kbd>⌘⇧6</kbd>은 macOS가 Touch Bar 캡처용으로 예약해 둔 자리지만, Karabiner는
-  시스템 단축키 계층보다 아래에서 이벤트를 가로채므로 충돌하지 않는다. 대신
-  Raycast·Alfred·단축어 앱으로 옮길 때는 시스템 설정 → 키보드 → 키보드 단축키 →
-  스크린샷에서 Touch Bar 항목을 꺼야 한다.
-- **Alfred / Raycast / 단축어 앱**: 같은 `open` 명령에 핫키 지정.
+인자 없이 실행하면 기존처럼 일회성 일반 캡처가 시작된다.
 
 ## 첫 실행 권한 (한 번만)
 
@@ -390,7 +388,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | `--target 별칭\|번들ID` | 이번 실행은 무조건 이 앱으로 (저장된 목적지보다 우선) | — |
 | `--out DIR` | 저장 폴더 (이번 실행만) | 위 저장 폴더 순서 참고 |
 | `--choose-dir` | 폴더 선택창을 열어 앱 기본 저장 폴더로 저장 | — |
-| `--settings` | 목적지·붙여넣기 형식·자동 실행·포커스 설정창 열기 | — |
+| `--settings` | 목적지·붙여넣기·자동 실행·포커스·단축키 설정창 열기 | — |
 | `--no-paste` | 클립보드 복사까지만, 자동 ⌘V 안 함 | — |
 | `--timeout SEC` | 선택 UI 대기 시간 | `300` |
 | `--self-test` | 폴더·최전면 앱·권한 상태만 출력하고 종료 | — |
@@ -422,7 +420,7 @@ rm -f ~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist
 rm -rf /Applications/AIShot.app
 tccutil reset All space.techjuicelab.aishot
 defaults delete space.techjuicelab.aishot 2>/dev/null
-# 런처/Karabiner에서 핫키 룰 제거
+# 외부 런처/Karabiner를 쓰고 있다면 해당 핫키 룰도 제거
 ```
 
 로그: `/tmp/aishot.log`

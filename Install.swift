@@ -127,6 +127,7 @@ enum Install {
         retireLegacyAgent()
         guard stopRunningHosts() else { return false }
         removeCopiesElsewhere()
+        migrateLegacyHotkeysIfReady()
         guard writeAndStartAgent() else { return false }
 
         CFPreferencesSetAppValue(installDirKey, installDir as CFString, domain)
@@ -197,6 +198,21 @@ enum Install {
 
     private static func createInstallDir() -> Bool {
         (try? fm.createDirectory(atPath: installDir, withIntermediateDirectories: true)) != nil
+    }
+
+    private static func migrateLegacyHotkeysIfReady() {
+        // Preserve the old launcher if a different app owns a native binding.
+        // The probe does not write preferences and releases all registrations
+        // before the installed menu host starts.
+        NSApplication.shared.setActivationPolicy(.accessory)
+        let probe = NativeHotkeyManager(onAction: { _ in })
+        probe.start()
+        guard probe.registrationFailures.isEmpty else {
+            log("hotkeys: keeping legacy bindings because a native shortcut is unavailable; choose another shortcut in Settings")
+            return
+        }
+        LegacyHotkeyMigration.runIfNeeded()
+        withExtendedLifetime(probe) {}
     }
 
     private static func retireLegacyAgent() {

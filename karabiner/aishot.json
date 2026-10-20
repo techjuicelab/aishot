@@ -28,12 +28,12 @@
             ]
         },
         {
-            "description": "AI Screenshot: cmd+shift+6 launches AIShot scrolling capture (full page, then paste into the AI app)",
+            "description": "AI Screenshot: cmd+shift+8 launches AIShot scrolling capture (full page, then paste into the AI app)",
             "manipulators": [
                 {
                     "type": "basic",
                     "from": {
-                        "key_code": "6",
+                        "key_code": "8",
                         "modifiers": { "mandatory": ["command", "shift"] }
                     },
                     "to": [{ "shell_command": "open -nb space.techjuicelab.aishot --args --scroll" }]

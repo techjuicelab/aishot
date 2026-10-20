@@ -13,7 +13,7 @@
 
 ---
 
-For a regular screenshot, press a hotkey → drag a region (or hit <kbd>Space</kbd> for a window, <kbd>Esc</kbd>
+For a regular screenshot, press <kbd>⌘⇧2</kbd> → drag a region (or hit <kbd>Space</kbd> for a window, <kbd>Esc</kbd>
 to cancel) → the PNG is saved into your usual screenshot folder **and** handed
 to the destination you chose from the [menu bar or Settings](#menu-bar):
 
@@ -50,7 +50,7 @@ short-lived process and exits as soon as the save/paste handoff is complete.
 
 ## Copy text from a screenshot
 
-Choose **Copy Text from Screenshot…** from the menu bar, then drag over the text
+Press <kbd>⌘⇧1</kbd> or choose **Copy Text from Screenshot…** from the menu bar, then drag over the text
 you need. AIShot recognizes Korean and English with Apple Vision and copies
 **only the text** to the clipboard, ready for you to paste with <kbd>⌘V</kbd>.
 Recognition runs locally, with no network connection or API key.
@@ -66,7 +66,7 @@ where no text is recognized leaves the existing clipboard untouched.
 
 ## Scrolling capture — a whole window in one image
 
-Press <kbd>⌘⇧6</kbd> and the screen dims with the window under the cursor
+Press <kbd>⌘⇧8</kbd> and the screen dims with the window under the cursor
 highlighted. Click the one you want (<kbd>Esc</kbd> cancels) and AIShot rewinds
 it to the top, scrolls to the bottom while photographing it, and matches the
 overlaps into **a single tall PNG**. The result is saved and routed to your
@@ -148,7 +148,7 @@ for:
   (Frontmost App)** and installed presets. The current choice has a checkmark;
   **More Destinations in Settings…** opens the full picker.
 - **Settings…** — the normal entry point for choosing any app and configuring
-  paste format, destination auto-open, and focus return.
+  paste format, destination auto-open, focus return, and built-in shortcuts.
 - **Open Screenshot Folder** — opens the folder AIShot currently saves into.
 - **Quit AIShot** — stops the menu host for this session. The LaunchAgent
   starts it again after the next login.
@@ -326,43 +326,44 @@ To opt out:
 defaults write space.techjuicelab.aishot SUEnableAutomaticChecks -bool false
 ```
 
-## Hotkey
+## Keyboard shortcuts
 
-Bind any launcher you already use to:
+AIShot provides its own global shortcuts while its menu bar host is running.
+Karabiner and other launchers are optional.
+
+| Action | Default shortcut |
+|---|---|
+| Screenshot | <kbd>⌘⇧2</kbd> |
+| Scrolling screenshot | <kbd>⌘⇧8</kbd> |
+| Copy screenshot text | <kbd>⌘⇧1</kbd> |
+
+Open the **menu bar → Settings… → Keyboard Shortcuts** tab, click an action's button,
+and press the new combination. <kbd>Esc</kbd> cancels recording; <kbd>Delete</kbd>
+without modifiers sets that action to **None**. **Restore Defaults** resets all
+three actions. Changes apply only after **Save**; **Cancel** keeps the previous
+settings. Duplicate combinations and conflicts with macOS or another app identify
+the affected action and prevent saving.
+
+The scrolling default is <kbd>⌘⇧8</kbd> to avoid macOS capture shortcuts in the
+<kbd>⌘⇧3</kbd>–<kbd>⌘⇧7</kbd> range. When its built-in shortcuts can be registered,
+the installer backs up the Karabiner settings file and disables AIShot’s old
+default <kbd>⌘⇧1</kbd>/<kbd>⌘⇧2</kbd>/<kbd>⌘⇧6</kbd> rules to prevent duplicate
+capture triggers. Backups are stored in
+`~/Library/Application Support/AIShot/Backups/`. Rules for other apps and customized combinations
+stay in place. If TextShot or another app uses <kbd>⌘⇧1</kbd>, change or disable
+one of the competing shortcuts.
+
+To keep using Alfred, Raycast, Shortcuts.app, or Karabiner, bind the command for
+the action you want. Set the corresponding AIShot shortcut to **None** when an
+external launcher uses the same combination.
 
 ```sh
 open -gnb space.techjuicelab.aishot --args --capture
-```
-
-No arguments still means the same one-shot capture, so existing launcher and
-Karabiner rules continue to work unchanged.
-
-For text recognition and clipboard copying, bind a separate hotkey to:
-
-```sh
+open -gnb space.techjuicelab.aishot --args --scroll
 open -gnb space.techjuicelab.aishot --args --ocr
 ```
 
-- **Karabiner-Elements**:
-
-  ```sh
-  mkdir -p ~/.config/karabiner/assets/complex_modifications
-  cp karabiner/aishot.json ~/.config/karabiner/assets/complex_modifications/
-  ```
-
-  then enable the "AIShot" rule in Karabiner-Elements → Complex
-  Modifications → Add predefined rule. Ships as <kbd>⌘⇧2</kbd> for a region and
-  <kbd>⌘⇧6</kbd> for a scrolling capture — right next to the system's ⌘⇧3/4/5
-  screenshot family. An optional <kbd>⌘⇧1</kbd> rule copies text from a screenshot.
-  If TextShot already uses <kbd>⌘⇧1</kbd>, enable only one of the two bindings.
-  A **both-<kbd>⇧</kbd>-keys-at-once** rule (Codex-style) is included too —
-  enable it as well if you like.
-
-  <kbd>⌘⇧6</kbd> is the slot macOS reserves for capturing the Touch Bar, but
-  Karabiner intercepts below the system hotkey layer so the two never meet. If
-  you move the binding to Raycast, Alfred or Shortcuts.app, turn the Touch Bar
-  entry off under System Settings → Keyboard → Keyboard Shortcuts → Screenshots.
-- **Alfred / Raycast / Shortcuts.app**: point a hotkey at the same `open` command.
+Launching without arguments still starts a one-shot regular capture.
 
 ## First-run permissions (one-time)
 
@@ -408,7 +409,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | `--target alias\|bundle-id` | send this run's shot to that app unconditionally (beats the stored destination) | — |
 | `--out DIR` | destination folder (this run only) | see save-location order above |
 | `--choose-dir` | open a folder picker and save the choice as the app's default | — |
-| `--settings` | open the destination, paste-format, auto-launch, and focus settings | — |
+| `--settings` | open destination, paste-format, auto-launch, focus, and shortcut settings | — |
 | `--no-paste` | copy to clipboard only, never synthesize ⌘V | — |
 | `--timeout SEC` | how long the selection UI may wait | `300` |
 | `--self-test` | print folder / frontmost app / permission state and exit | — |
@@ -441,7 +442,7 @@ rm -f ~/Library/LaunchAgents/space.techjuicelab.aishot.menubar.plist
 rm -rf /Applications/AIShot.app
 tccutil reset All space.techjuicelab.aishot
 defaults delete space.techjuicelab.aishot 2>/dev/null
-# and remove the hotkey rule from your launcher / Karabiner
+# if configured, also remove its shortcut from your launcher / Karabiner
 ```
 
 Log: `/tmp/aishot.log`

@@ -20,8 +20,8 @@ BIN="$APP/Contents/MacOS/AIShot"
 # The released version. release.sh rewrites both lines when it cuts a release;
 # nothing else should edit them, since VERSION is what the appcast advertises
 # and BUILD is what Sparkle compares.
-VERSION=1.9
-BUILD=12
+VERSION=1.10
+BUILD=13
 
 NO_INSTALL=0
 for arg in "$@"; do
@@ -117,7 +117,7 @@ fi
 # Universal binary (Apple Silicon + Intel), deployment target macOS 14.
 # main.swift must stay in the list: swiftc picks the entry point by that name,
 # and every other file is a plain declaration-only source compiled alongside it.
-SOURCES=(main.swift ScrollCapture.swift Install.swift)
+SOURCES=(main.swift ScrollCapture.swift Install.swift Hotkeys.swift HotkeySettings.swift LegacyHotkeyMigration.swift)
 swiftc -O -target arm64-apple-macos14.0  "${SPARKLE_FLAGS[@]}" -o /tmp/aishot-arm64  "${SOURCES[@]}"
 swiftc -O -target x86_64-apple-macos14.0 "${SPARKLE_FLAGS[@]}" -o /tmp/aishot-x86_64 "${SOURCES[@]}"
 lipo -create /tmp/aishot-arm64 /tmp/aishot-x86_64 -output "$BIN"

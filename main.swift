@@ -547,10 +547,24 @@ final class SettingsController: NSObject {
     }
 }
 
-func presentSettings() {
+@discardableResult
+func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     app.activate()
+
+    // Settings live in the host, so the recorder can safely release its global
+    // registrations without cross-process suspension or a recovery timeout.
+    hotkeys?.suspend()
+    defer { hotkeys?.resume() }
+    let domain = "space.techjuicelab.aishot" as CFString
+    CFPreferencesAppSynchronize(domain)
+    let storedTargetID = (CFPreferencesCopyAppValue("targetApp" as CFString, domain) as? String)
+        .flatMap { $0.isEmpty ? nil : resolveTarget($0, source: "targetApp setting") }
+    let storedTargetMode = (CFPreferencesCopyAppValue("targetPasteMode" as CFString, domain) as? String) ?? "auto"
+    let autoLaunchTarget = (CFPreferencesCopyAppValue("autoLaunchTarget" as CFString, domain) as? Bool) ?? true
+    let returnFocus = (CFPreferencesCopyAppValue("returnFocus" as CFString, domain) as? Bool) ?? false
+    let pasteSubmit = (CFPreferencesCopyAppValue("pasteSubmit" as CFString, domain) as? Bool) ?? false
 
     let destinationPopup = NSPopUpButton(frame: NSRect(x: 112, y: 284, width: 250, height: 26))
     destinationPopup.addItem(withTitle: t("자동 (최전면 앱)", "Automatic (frontmost app)"))
@@ -675,31 +689,76 @@ func presentSettings() {
     let folderLabel = label(t("저장 폴더", "Save folder"), y: 131)
 
     let note = NSTextField(wrappingLabelWithString: t(
-        "붙여넣은 뒤에도 이미지나 파일 경로는 클립보드에 그대로 남습니다. 언어를 바꾸면 메뉴 막대에는 바로, 이 창에는 다음에 열 때 반영됩니다.",
-        "The copied image or file path remains on the clipboard after AIShot pastes it. A language change applies to the menu bar right away and to this panel the next time it opens."))
+        "이미지·경로는 클립보드에 남습니다. 바꾼 언어는 이 창을 다시 열면 반영됩니다.",
+        "Copied images and file paths stay on the clipboard. Language changes update this panel when reopened."))
     note.frame = NSRect(x: 112, y: 0, width: 408, height: 34)
     note.textColor = .secondaryLabelColor
     note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
 
-    let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 313))
+    let shortcutEditor = HotkeySettingsView(configuration: NativeHotkeyPreferences.load())
+    let shortcutHeight = HotkeySettingsView.preferredHeight
+    shortcutEditor.frame = NSRect(x: 0, y: 313 - shortcutHeight, width: 520, height: shortcutHeight)
+    shortcutEditor.autoresizingMask = [.width, .minYMargin]
+    if let issue = HotkeyAction.allCases.compactMap({ hotkeys?.registrationIssues[$0] }).first {
+        shortcutEditor.showValidationError(issue.message)
+    }
+    defer { shortcutEditor.finishRecording() }
+    let generalPane = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 313))
     [destinationLabel, destinationPopup, chooseButton, formatLabel, formatPopup,
      ocrLabel, ocrPopup, languageLabel, languagePopup, folderLabel, folderPopup,
      folderButton, launchCheckbox, returnCheckbox, submitCheckbox,
-     note].forEach(accessory.addSubview)
+     note].forEach {
+        generalPane.addSubview($0)
+    }
+    let shortcutPane = NSView(frame: generalPane.frame)
+    shortcutPane.addSubview(shortcutEditor)
+    // Keep the panel usable on smaller laptop displays instead of adding all
+    // shortcut controls below an already full settings form.
+    let tabs = NSTabView(frame: NSRect(x: 0, y: 0, width: 552, height: 355))
+    let generalTab = NSTabViewItem(identifier: "general")
+    generalTab.label = t("일반", "General")
+    generalTab.view = generalPane
+    let shortcutTab = NSTabViewItem(identifier: "shortcuts")
+    shortcutTab.label = t("단축키", "Keyboard Shortcuts")
+    shortcutTab.view = shortcutPane
+    tabs.addTabViewItem(generalTab)
+    tabs.addTabViewItem(shortcutTab)
+    if shortcutEditor.validationMessage() != nil { tabs.selectTabViewItem(shortcutTab) }
 
     let alert = NSAlert()
     alert.messageText = t("AIShot 설정", "AIShot Settings")
     alert.informativeText = t(
-        "모든 캡처를 어디로 보낼지 고르세요. 자동은 기존처럼 최전면 앱을 따라갑니다.",
-        "Choose where every capture should go. Automatic keeps the original frontmost-app behavior.")
-    alert.accessoryView = accessory
+        "캡처 목적지와 단축키를 설정하세요. 텍스트 복사는 목적지와 무관하게 클립보드에 복사합니다.",
+        "Choose your capture destination and keyboard shortcuts. Copy Text always copies to the clipboard.")
+    alert.accessoryView = tabs
     alert.addButton(withTitle: t("저장", "Save"))
     alert.addButton(withTitle: t("취소", "Cancel"))
 
-    let response = withExtendedLifetime(controller) { alert.runModal() }
-    guard response == .alertFirstButtonReturn else { return }
+    shortcutEditor.onValidationChanged = { [weak alert] message in
+        alert?.buttons.first?.isEnabled = message == nil
+    }
+    alert.buttons.first?.isEnabled = shortcutEditor.validationMessage() == nil
+    // A standalone settings run is only a fallback when the host is absent.
+    // Its temporary manager verifies exclusive OS registration before saving.
+    let validationManager = hotkeys ?? NativeHotkeyManager(onAction: { _ in })
+    while true {
+        let response = withExtendedLifetime(controller) { alert.runModal() }
+        shortcutEditor.finishRecording()
+        guard response == .alertFirstButtonReturn else { return false }
+        if let message = shortcutEditor.validationMessage() {
+            shortcutEditor.showValidationError(message)
+            tabs.selectTabViewItem(shortcutTab)
+            continue
+        }
+        do {
+            try validationManager.apply(shortcutEditor.configuration)
+            break
+        } catch {
+            shortcutEditor.showValidationError(error.localizedDescription)
+            tabs.selectTabViewItem(shortcutTab)
+        }
+    }
     let selectedID = (destinationPopup.selectedItem?.representedObject as? String) ?? ""
-    let domain = "space.techjuicelab.aishot" as CFString
     if selectedID.isEmpty {
         CFPreferencesSetAppValue("targetApp" as CFString, nil, domain)
     } else {
@@ -726,9 +785,33 @@ func presentSettings() {
         ? "destination set to Automatic"
         : "destination set to \(destinationDisplayName(bundleID: selectedID)) (\(selectedID))")
     log("save folder: \(selectedFolder.isEmpty ? "system location" : selectedFolder)")
+    return true
 }
 
 // MARK: - menu bar
+
+private enum SettingsRequests {
+    static let open = Notification.Name("space.techjuicelab.aishot.settings.open")
+    static let acknowledged = Notification.Name("space.techjuicelab.aishot.settings.acknowledged")
+}
+
+func requestSettingsFromHost() -> Bool {
+    let token = UUID().uuidString
+    var acknowledged = false
+    let center = DistributedNotificationCenter.default()
+    let observer = center.addObserver(forName: SettingsRequests.acknowledged,
+                                      object: token, queue: .main) { _ in
+        acknowledged = true
+    }
+    defer { center.removeObserver(observer) }
+    center.postNotificationName(SettingsRequests.open, object: token,
+                                userInfo: nil, deliverImmediately: true)
+    let deadline = Date(timeIntervalSinceNow: 1)
+    while !acknowledged, Date() < deadline {
+        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.02))
+    }
+    return acknowledged
+}
 
 #if canImport(Sparkle)
 // Writes the marker the relaunched process looks for. This callback is the last
@@ -750,6 +833,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                                               keyEquivalent: "")
     private let hostLockFD: Int32
     private let preferencesDomain = "space.techjuicelab.aishot" as CFString
+    private var hotkeys: NativeHotkeyManager!
+    private var settingsOpen = false
+    private var settingsScheduled = false
 
     #if canImport(Sparkle)
     // The menu bar host is the only long-lived AIShot process — capture workers
@@ -781,6 +867,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         #endif
         super.init()
 
+        hotkeys = NativeHotkeyManager(onAction: { [weak self] action in
+            self?.captureFromHotkey(action)
+        })
+        hotkeys.start()
+        for (action, status) in hotkeys.registrationFailures {
+            log("shortcut unavailable: \(action.rawValue) (\(status)) — choose another shortcut in Settings")
+        }
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(settingsRequested(_:)),
+            name: SettingsRequests.open, object: nil)
+
         statusItem.autosaveName = "space.techjuicelab.aishot.status"
         statusItem.isVisible = true
 
@@ -811,6 +908,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     deinit {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
         Darwin.close(hostLockFD)
     }
 
@@ -998,6 +1096,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         launchSibling(arguments: arguments, activates: false)
     }
 
+    private func captureFromHotkey(_ action: HotkeyAction) {
+        // Dispatch after Carbon's callback returns. Capture workers keep
+        // the existing frontmost-app routing and cross-process capture lock.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.settingsOpen else { return }
+            switch action {
+            case .screenshot: self.captureScreenshot(nil)
+            case .scroll: self.captureScrollingScreenshot(nil)
+            case .ocr: self.copyScreenshotText(nil)
+            }
+        }
+    }
+
     @objc private func selectDestination(_ sender: NSMenuItem) {
         let bundleID = (sender.representedObject as? String) ?? ""
         CFPreferencesSetAppValue("targetApp" as CFString,
@@ -1011,7 +1122,38 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openSettings(_ sender: Any?) {
-        launchSibling(arguments: ["--settings"], activates: true)
+        guard !settingsOpen else {
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        guard let lock = acquireProcessLock("settings") else {
+            activateExistingSettingsWindow()
+            return
+        }
+        settingsOpen = true
+        defer {
+            settingsOpen = false
+            Darwin.close(lock)
+        }
+        presentSettings(hotkeys: hotkeys)
+        uiLanguage = currentUILanguage()
+        rebuildMenu()
+    }
+
+    @objc private func settingsRequested(_ notification: Notification) {
+        // Acknowledge before entering the modal loop so the CLI worker can exit.
+        DistributedNotificationCenter.default().postNotificationName(
+            SettingsRequests.acknowledged, object: notification.object as? String,
+            userInfo: nil, deliverImmediately: true)
+        guard !settingsOpen, !settingsScheduled else {
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        settingsScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            self?.settingsScheduled = false
+            self?.openSettings(nil)
+        }
     }
 
     @objc private func openScreenshotFolder(_ sender: Any?) {
@@ -1103,12 +1245,33 @@ func activateExistingSettingsWindow() {
 }
 
 if showSettings {
+    if requestSettingsFromHost() { exit(0) }
+    // A missed acknowledgement can mean a busy host. Do not open a separate
+    // recorder while that host still owns the global shortcuts.
+    guard let absentHostProbe = acquireProcessLock("menubar") else {
+        if !requestSettingsFromHost() { activateExistingSettingsWindow() }
+        log("settings requested from the existing menu bar host")
+        exit(0)
+    }
     guard acquireProcessLock("settings") != nil else {
+        Darwin.close(absentHostProbe)
         log("settings are already open — bringing the existing window forward")
         activateExistingSettingsWindow()
         exit(0)
     }
-    presentSettings()
+    let saved = presentSettings()
+    Darwin.close(absentHostProbe)
+    if saved, Install.bundlePath == Install.installedPath {
+        // A user can open Settings after quitting the host. Start it again so
+        // shortcuts saved in the fallback panel work immediately.
+        let launch = Process()
+        launch.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        launch.arguments = ["-gn", Install.installedPath, "--args", "--menubar"]
+        do {
+            try launch.run()
+            launch.waitUntilExit()
+        } catch { log("could not start the shortcut host: \(error)") }
+    }
     exit(0)
 }
 
@@ -1400,6 +1563,10 @@ func postReturnKey(to app: NSRunningApplication) -> Bool {
 }
 
 if selfTest {
+    let shortcuts = NativeHotkeyPreferences.load()
+    for action in HotkeyAction.allCases {
+        log("shortcut \(action.rawValue): \(shortcuts[action]?.displayString ?? "disabled")")
+    }
     if ocrMode {
         log("dir:            \(screenshotFolder())")
         log("screen-record:  \(CGPreflightScreenCaptureAccess() ? "granted" : "NOT granted")")
@@ -1473,6 +1640,14 @@ if chooseDir {
 }
 
 // MARK: - capture
+
+// An older launcher may still send a capture command while the shortcut
+// recorder is open. Do not let it interrupt editing with a capture overlay.
+guard let settingsProbe = acquireProcessLock("settings") else {
+    log("settings are open — ignored capture trigger")
+    exit(0)
+}
+Darwin.close(settingsProbe)
 
 guard acquireProcessLock("capture") != nil else {
     log("capture already in progress — ignored duplicate trigger")
