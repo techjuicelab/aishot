@@ -201,12 +201,12 @@ fi
 # Commit the version bump first and tag *that* commit: a tag whose build.sh says
 # 1.6 while the release says 1.7 cannot be rebuilt into what was shipped.
 git add build.sh
-git commit -m "chore(release): bump to $VERSION — build $BUILD
-
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+git commit -m "chore(release): prepare $VERSION — 배포 빌드 $BUILD 준비"
 git push origin main
+RELEASE_COMMIT=$(git rev-parse HEAD)
 
 gh release create "v$VERSION" -R "$REPO" \
+  --target "$RELEASE_COMMIT" \
   --title "AIShot $VERSION" \
   --notes "AIShot $VERSION
 
@@ -216,9 +216,7 @@ gh release create "v$VERSION" -R "$REPO" \
 
 # Only now: the appcast points at assets that exist.
 git add appcast.xml
-git commit -m "release(aishot): publish $VERSION — appcast에 $VERSION 항목 추가
-
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+git commit -m "chore(release): publish $VERSION — 자동 업데이트 항목 등록"
 git push origin main
 
 echo "published: https://github.com/$REPO/releases/tag/v$VERSION"

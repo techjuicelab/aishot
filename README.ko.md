@@ -13,11 +13,11 @@
 
 ---
 
-단축키 → 영역 드래그(<kbd>Space</kbd>로 창 선택, <kbd>Esc</kbd> 취소) → PNG가
+일반 스크린샷은 단축키 → 영역 드래그(<kbd>Space</kbd>로 창 선택, <kbd>Esc</kbd> 취소) → PNG가
 기존 스크린샷 폴더에 저장되는 **동시에**, [메뉴 막대 또는 설정](#메뉴-막대)에서
 고른 목적지로 들어간다:
 
-| 목적지 설정 | 모든 캡처가 가는 곳 | 붙여넣는 형식 |
+| 목적지 설정 | 일반 스크린샷이 가는 곳 | 붙여넣는 형식 |
 |---|---|---|
 | 특정 앱 — Claude, Antigravity, ChatGPT, Codex, Muse 또는 다른 앱 | 무엇이 최전면이었든 그 앱. 필요하면 기본적으로 AIShot이 앱을 실행 | **자동**, **PNG 이미지**, **파일 경로** 중 설정 가능 |
 | 터미널 — Ghostty, iTerm2, Terminal, WezTerm, kitty, Warp | 그 안에 띄워 둔 CLI 에이전트 — Claude Code, Codex CLI, Gemini CLI. 터미널이 마지막으로 포커스하고 있던 창·탭·스플릿 | 이스케이프된 **파일 경로** + 자동 ⌘V, 원하면 이어서 <kbd>Enter</kbd> |
@@ -45,6 +45,21 @@ open -nb space.techjuicelab.aishot --args --choose-dir
 AIShot은 제어와 캡처를 분리한다. 가벼운 **메뉴 막대 호스트** 하나가 목적지
 전환을 위해 대기하고, 실제 캡처는 매번 별도의 단기 프로세스에서 실행되어
 저장·붙여넣기가 끝나는 즉시 종료된다.
+
+## 스크린샷에서 텍스트 복사
+
+메뉴 막대의 **스크린샷 텍스트 복사…**를 누르고 필요한 글자가 있는 영역을
+드래그하면, Apple Vision이 한국어와 영어를 인식해 **텍스트만 클립보드에 복사**한다.
+원하는 곳에서 <kbd>⌘V</kbd>로 붙여넣으면 된다. 인식은 Mac 안에서 처리하며
+네트워크 연결이나 API 키가 필요 없다.
+
+```sh
+open -gnb space.techjuicelab.aishot --args --ocr
+```
+
+이 전용 모드는 목적지와 자동 붙여넣기 설정을 무시한다. 앱을 열거나 자동으로
+붙여넣지 않으며, PNG는 기존 스크린샷 폴더에 그대로 저장한다. <kbd>Esc</kbd>로
+취소하거나 인식된 글자가 없으면 기존 클립보드를 유지한다.
 
 ## 스크롤 캡처 — 창 전체를 한 장으로
 
@@ -116,6 +131,7 @@ defaults write space.techjuicelab.aishot scrollMaxFrames -int 120   # 기본 60
 등록해 로그인할 때마다 다시 띄운다. 뷰파인더 아이콘을 누르면 다음 항목이 나온다:
 
 - **Capture Screenshot…** — 단축키와 같은 일회성 영역 캡처를 시작.
+- **스크린샷 텍스트 복사…** — 영역을 골라 인식한 텍스트만 클립보드에 복사.
 - **Capture Scrolling Screenshot…** — 창을 골라 전체를 이어붙이는 캡처를 시작.
 - **Destination: _현재 앱_** — **Automatic (Frontmost App)**과 설치된 프리셋
   사이를 빠르게 전환. 현재 선택에는 체크 표시가 붙고,
@@ -137,7 +153,8 @@ open -gnb space.techjuicelab.aishot --args --menubar
 **AIShot 메뉴 막대 → Settings…**를 연다. Claude, Antigravity, ChatGPT,
 Codex, Gemini, Muse (Meta) 같은 프리셋을 고르거나
 **Choose Other…**로 설치된 어떤 `.app`이든 선택할 수 있다. 목적지를 지정하면
-**어떤 앱이 최전면이었는지와 무관하게 모든 캡처가 그곳으로 간다**.
+**어떤 앱이 최전면이었는지와 무관하게 일반·스크롤 스크린샷이 그곳으로 간다**.
+전용 **스크린샷 텍스트 복사…** 모드는 항상 텍스트만 클립보드에 복사한다.
 
 ### 터미널 안의 CLI 에이전트
 
@@ -304,6 +321,12 @@ open -gnb space.techjuicelab.aishot --args --capture
 인자 없이 실행해도 같은 일회성 캡처이므로 기존 런처와 Karabiner 룰은 그대로
 동작한다.
 
+텍스트 인식·복사 전용 단축키는 다음 명령에 연결한다:
+
+```sh
+open -gnb space.techjuicelab.aishot --args --ocr
+```
+
 - **Karabiner-Elements**:
 
   ```sh
@@ -313,7 +336,9 @@ open -gnb space.techjuicelab.aishot --args --capture
 
   그다음 Karabiner-Elements → Complex Modifications → Add predefined rule에서
   "AIShot" 활성화. 기본 키는 영역 캡처 <kbd>⌘⇧2</kbd>, 스크롤 캡처
-  <kbd>⌘⇧6</kbd> — 시스템 ⌘⇧3/4/5 스크린샷 패밀리 옆자리. **양쪽
+  <kbd>⌘⇧6</kbd> — 시스템 ⌘⇧3/4/5 스크린샷 패밀리 옆자리. 텍스트 복사용
+  <kbd>⌘⇧1</kbd> 룰은 원하는 경우에만 활성화한다. TextShot에서 이미
+  <kbd>⌘⇧1</kbd>을 쓰고 있다면 두 앱의 단축키 중 하나만 활성화한다. **양쪽
   <kbd>⇧</kbd> 동시 누르기** 룰(Codex 스타일)도 같이 들어 있으니 원하면 추가로
   활성화.
 
@@ -329,8 +354,11 @@ open -gnb space.techjuicelab.aishot --args --capture
    (시스템 설정 → 개인정보 보호 및 보안 → 화면 및 시스템 오디오 기록 → AIShot 허용).
 2. 다시 단축키 → 캡처 UI. 저장 시점에 스크린샷 폴더(iCloud Drive/데스크탑)에 대한
    **파일 및 폴더** 프롬프트가 나올 수 있다 — 거부하면 저장이 안 되니 허용.
-3. 첫 캡처 완료 후 → **손쉬운 사용** 프롬프트(자동 ⌘V용). 허용 전에는 클립보드
+3. 첫 일반·스크롤 캡처 완료 후 → **손쉬운 사용** 프롬프트(자동 ⌘V용). 허용 전에는 클립보드
    복사까지만 동작하고, 허용한 다음 샷부터 자동 붙여넣기.
+
+전용 `--ocr` 모드는 텍스트를 복사하기만 하고 <kbd>⌘V</kbd>를 보내지 않으므로
+손쉬운 사용 권한이 필요 없다.
 
 **서명과 권한 유지**: `build.sh`는 키체인에 유효한 코드 서명 ID
 `TechJuice Local Code Signing`이 있으면 자동으로 사용한다. 이 인증서의 안정적인
@@ -352,6 +380,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | 플래그 | 설명 | 기본값 |
 |---|---|---|
 | `--capture` | 영역 캡처 한 번 실행 후 종료 (인자 없는 실행의 명시적 별칭) | 인자 없는 기본 동작 |
+| `--ocr` | 영역을 골라 PNG를 저장하고 인식한 텍스트만 복사; 목적지·자동 붙여넣기 설정 무시 | — |
 | `--scroll` | 창을 골라 스크롤 캡처 (전체 페이지를 한 장으로) | — |
 | `--window ID` | 선택 UI 없이 지정한 창을 스크롤 캡처 (스크립트용) | — |
 | `--list-windows` | `--window`에 넣을 창 ID 목록 출력 | — |

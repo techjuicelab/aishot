@@ -10,6 +10,7 @@
 //   AI apps / browsers  → paste the PNG itself (⌘V)
 //   configured app      → launch/activate it and paste there every time
 //   anything else       → clipboard only, no keystroke
+//   --ocr               → recognize Korean/English and copy text only
 // Capture workers exit immediately after each shot. A lightweight --menubar
 // host provides quick destination switching and launches those workers.
 // Log: /tmp/aishot.log
@@ -222,6 +223,7 @@ var selfTest = false
 var chooseDir = false
 var showSettings = false
 var showMenuBar = false
+var ocrMode = false // --ocr: region capture → recognized text on the clipboard
 var scrollMode = false // --scroll: pick a window and capture it all the way down
 var scrollWindowID: CGWindowID? // --window ID: skip the picker, scroll this window
 var listWindows = false // --list-windows: print the IDs --window accepts
@@ -256,6 +258,7 @@ while let arg = argIt.next() {
     case "--choose-dir": chooseDir = true
     case "--settings":   showSettings = true
     case "--menubar":    showMenuBar = true
+    case "--ocr":        ocrMode = true
     case "--scroll":     scrollMode = true
     case "--window":
         guard let value = argIt.next(), let id = UInt32(value) else {
@@ -275,6 +278,7 @@ while let arg = argIt.next() {
     }
 }
 guard ["auto", "path", "image"].contains(mode) else { fail("--mode must be auto|path|image") }
+guard !(ocrMode && scrollMode) else { fail("--ocr cannot be combined with scrolling capture") }
 
 // MARK: - updater relaunch
 
@@ -819,6 +823,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         captureItem.target = self
         menu.addItem(captureItem)
 
+        let textCaptureItem = NSMenuItem(
+            title: t("스크린샷 텍스트 복사…", "Copy Text from Screenshot…"),
+            action: #selector(copyScreenshotText(_:)), keyEquivalent: "")
+        textCaptureItem.target = self
+        menu.addItem(textCaptureItem)
+
         let scrollCaptureItem = NSMenuItem(
             title: t("스크롤 스크린샷 찍기…", "Capture Scrolling Screenshot…"),
             action: #selector(captureScrollingScreenshot(_:)), keyEquivalent: "")
@@ -976,6 +986,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var arguments = ["--capture"]
         if let lastExternalFront { arguments += ["--assume-front", lastExternalFront] }
         launchSibling(arguments: arguments, activates: false)
+    }
+
+    @objc private func copyScreenshotText(_ sender: Any?) {
+        launchSibling(arguments: ["--ocr"], activates: false)
     }
 
     @objc private func captureScrollingScreenshot(_ sender: Any?) {
@@ -1386,6 +1400,13 @@ func postReturnKey(to app: NSRunningApplication) -> Bool {
 }
 
 if selfTest {
+    if ocrMode {
+        log("dir:            \(screenshotFolder())")
+        log("screen-record:  \(CGPreflightScreenCaptureAccess() ? "granted" : "NOT granted")")
+        log("ocr languages:  ko-KR, en-US (accurate; language correction off)")
+        log("would copy as:  OCR text (clipboard only; no destination or Accessibility required)")
+        exit(0)
+    }
     let r = effectiveRoute()
     log("dir:            \(screenshotFolder())")
     log("frontmost:      \(frontName) (\(frontID))")
@@ -1647,8 +1668,14 @@ if scrollMode {
 
         let ocrMode = storedScrollOcrMode()
         if ocrMode != "off" {
-            let text = recognizeText(in: result.image) { done, total in
-                if done % 4 == 0 || done == total { log("ocr: tile \(done)/\(total)") }
+            let text: String
+            do {
+                text = try recognizeText(in: result.image) { done, total in
+                    if done % 4 == 0 || done == total { log("ocr: tile \(done)/\(total)") }
+                }
+            } catch {
+                log("ocr failed: \(error) — delivering the image only")
+                text = ""
             }
             if text.isEmpty {
                 log("ocr: no text recognized — delivering the image only")
@@ -1724,6 +1751,40 @@ if scrollMode {
     guard fm.fileExists(atPath: savePath) else {
         log("nothing captured (screencapture exit \(proc.terminationStatus)) — Esc pressed, or capture failed")
         exit(0)
+    }
+}
+
+// OCR copy has its own delivery path: a pinned terminal, pasteSubmit or an image
+// preference must never turn recognized text into a path or a keystroke.
+if ocrMode {
+    do {
+        guard let image = NSImage(contentsOfFile: savePath)?.cgImage(
+            forProposedRect: nil, context: nil, hints: nil) else {
+            throw TextRecognitionError.invalidImage
+        }
+        let text = try recognizeText(in: image, usesLanguageCorrection: false)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            log("ocr: no text recognized — clipboard unchanged; saved \(savePath)")
+            showHUD(t("인식된 텍스트가 없습니다. 클립보드를 유지했습니다.",
+                      "No text found. Clipboard unchanged."))
+            exit(0)
+        }
+        let clipboard = NSPasteboard.general
+        clipboard.clearContents()
+        guard clipboard.setString(text, forType: .string) else {
+            log("ocr: could not copy text; saved \(savePath)")
+            showHUD(t("텍스트를 클립보드에 복사하지 못했습니다.",
+                      "Could not copy text to the clipboard."))
+            exit(1)
+        }
+        log("ocr: copied \(text.count) characters to clipboard; saved \(savePath)")
+        showHUD(t("✓  텍스트 복사 완료 — \(text.count)자", "✓  Text copied — \(text.count) characters"))
+        exit(0)
+    } catch {
+        log("ocr failed: \(error) — clipboard unchanged; saved \(savePath)")
+        showHUD(t("텍스트 인식에 실패했습니다. 클립보드를 유지했습니다.",
+                  "Text recognition failed. Clipboard unchanged."))
+        exit(1)
     }
 }
 

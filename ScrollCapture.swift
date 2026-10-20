@@ -1288,6 +1288,11 @@ func pickAndScrollCapture(maxFrames: Int,
 
 // MARK: - text recognition
 
+enum TextRecognitionError: Error {
+    case invalidImage
+    case tileUnavailable
+}
+
 /// Reads the text out of a stitched capture with the system OCR.
 ///
 /// This exists because of a hard ceiling on the other side: Claude downscales
@@ -1302,10 +1307,11 @@ func pickAndScrollCapture(maxFrames: Int,
 /// and tiling also bounds memory. The overlap guarantees every text line falls
 /// completely inside at least one tile; each line is then attributed to exactly
 /// one tile by its centre, so the seams neither cut nor duplicate lines.
-func recognizeText(in image: CGImage, progress: (Int, Int) -> Void = { _, _ in }) -> String {
+func recognizeText(in image: CGImage, usesLanguageCorrection: Bool = true,
+                   progress: (Int, Int) -> Void = { _, _ in }) throws -> String {
     let width = image.width
     let height = image.height
-    guard width > 0, height > 0 else { return "" }
+    guard width > 0, height > 0 else { throw TextRecognitionError.invalidImage }
 
     // Tile height is tied to the tile's *aspect ratio*, not to a fixed number of
     // pixels, because that is what Vision actually reacts to. Measured on a
@@ -1330,16 +1336,16 @@ func recognizeText(in image: CGImage, progress: (Int, Int) -> Void = { _, _ in }
         guard thisHeight > 0 else { break }
         guard let tile = image.cropping(to: CGRect(x: 0, y: tileTop,
                                                    width: width, height: thisHeight))
-        else { continue }
+        else { throw TextRecognitionError.tileUnavailable }
 
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.recognitionLanguages = ["ko-KR", "en-US"]
-        request.usesLanguageCorrection = true
+        request.usesLanguageCorrection = usesLanguageCorrection
 
         let handler = VNImageRequestHandler(cgImage: tile)
-        guard (try? handler.perform([request])) != nil,
-              let observations = request.results else { continue }
+        try handler.perform([request])
+        let observations = request.results ?? []
 
         // A line belongs to this tile if its centre lies outside the half-overlap
         // margins; the neighbouring tile owns the margins' lines. Every line is
@@ -1350,20 +1356,43 @@ func recognizeText(in image: CGImage, progress: (Int, Int) -> Void = { _, _ in }
 
         // Vision's boxes are normalized, origin bottom-left; captures are
         // reasoned about top-down.
-        var accepted: [(y: Double, x: Double, text: String)] = []
+        var accepted: [(y: Double, x: Double, height: Double, text: String)] = []
         for observation in observations {
             guard let candidate = observation.topCandidates(1).first else { continue }
             let box = observation.boundingBox
             let centerY = (1.0 - Double(box.midY)) * Double(thisHeight)
             guard centerY >= acceptFrom, centerY < acceptTo else { continue }
-            accepted.append((centerY, Double(box.minX), candidate.string))
+            accepted.append((centerY, Double(box.minX), Double(box.height) * Double(thisHeight),
+                             candidate.string))
         }
-        // Reading order within the tile: top to bottom, left to right for lines
-        // that share a baseline. The tolerance is roughly half a line height.
+        // First use a strict order. A pairwise "close enough in y" comparator
+        // is not transitive and can swap densely spaced, indented lines.
         accepted.sort {
-            abs($0.y - $1.y) > 14 ? $0.y < $1.y : $0.x < $1.x
+            if $0.y != $1.y { return $0.y < $1.y }
+            if $0.x != $1.x { return $0.x < $1.x }
+            return $0.text < $1.text
         }
-        lines.append(contentsOf: accepted.map(\.text))
+        // Group around a fixed row anchor, then sort that row left to right.
+        // Scale the tolerance to the glyphs, so small text on adjacent lines
+        // does not get mistaken for fragments of a single row.
+        var rowStart = 0
+        while rowStart < accepted.count {
+            let anchor = accepted[rowStart]
+            var rowEnd = rowStart + 1
+            while rowEnd < accepted.count {
+                let next = accepted[rowEnd]
+                let tolerance = min(anchor.height, next.height) * 0.45
+                guard next.y - anchor.y <= tolerance else { break }
+                rowEnd += 1
+            }
+            let row = accepted[rowStart ..< rowEnd].sorted {
+                if $0.x != $1.x { return $0.x < $1.x }
+                if $0.y != $1.y { return $0.y < $1.y }
+                return $0.text < $1.text
+            }
+            lines.append(contentsOf: row.map(\.text))
+            rowStart = rowEnd
+        }
         progress(tileIndex + 1, tileCount)
     }
 

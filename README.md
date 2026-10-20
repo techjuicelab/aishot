@@ -13,11 +13,11 @@
 
 ---
 
-Press a hotkey → drag a region (or hit <kbd>Space</kbd> for a window, <kbd>Esc</kbd>
+For a regular screenshot, press a hotkey → drag a region (or hit <kbd>Space</kbd> for a window, <kbd>Esc</kbd>
 to cancel) → the PNG is saved into your usual screenshot folder **and** handed
 to the destination you chose from the [menu bar or Settings](#menu-bar):
 
-| Destination setting | Where every capture goes | What gets pasted |
+| Destination setting | Where regular screenshots go | What gets pasted |
 |---|---|---|
 | A specific app — Claude, Antigravity, ChatGPT, Codex, Muse, or any other app | that app, regardless of what was frontmost; AIShot opens it when needed by default | configurable: **Automatic**, **PNG image**, or **File path** |
 | A terminal — Ghostty, iTerm2, Terminal, WezTerm, kitty, Warp | the CLI agent you keep open there — Claude Code, Codex CLI, Gemini CLI — in whichever window, tab and split the terminal itself last had focused | escaped **file path** + auto ⌘V, optionally followed by <kbd>Return</kbd> |
@@ -48,13 +48,29 @@ AIShot separates control from capture: one lightweight **menu bar host** stays
 available for destination changes, while every capture runs in its own
 short-lived process and exits as soon as the save/paste handoff is complete.
 
+## Copy text from a screenshot
+
+Choose **Copy Text from Screenshot…** from the menu bar, then drag over the text
+you need. AIShot recognizes Korean and English with Apple Vision and copies
+**only the text** to the clipboard, ready for you to paste with <kbd>⌘V</kbd>.
+Recognition runs locally, with no network connection or API key.
+
+```sh
+open -gnb space.techjuicelab.aishot --args --ocr
+```
+
+This dedicated mode ignores the destination and automatic paste settings: it
+does not open an app or paste automatically. The PNG is still saved in your
+usual screenshot folder. Cancelling with <kbd>Esc</kbd> or capturing an area
+where no text is recognized leaves the existing clipboard untouched.
+
 ## Scrolling capture — a whole window in one image
 
 Press <kbd>⌘⇧6</kbd> and the screen dims with the window under the cursor
 highlighted. Click the one you want (<kbd>Esc</kbd> cancels) and AIShot rewinds
 it to the top, scrolls to the bottom while photographing it, and matches the
 overlaps into **a single tall PNG**. The result is saved and routed to your
-destination exactly like any other capture.
+destination exactly like a regular screenshot.
 
 This is not browser-only — **anything that scrolls generally works**: Safari,
 Chrome, Firefox, native apps. Because nothing outside a window can read its
@@ -124,6 +140,8 @@ for:
 
 - **Capture Screenshot…** — starts the same one-shot interactive capture as
   the hotkey.
+- **Copy Text from Screenshot…** — select an area and copy its recognized text
+  to the clipboard.
 - **Capture Scrolling Screenshot…** — pick a window and capture all of it as
   one stitched image.
 - **Destination: _current app_** — quickly switch between **Automatic
@@ -141,12 +159,13 @@ If the menu icon is not running, start the singleton host manually:
 open -gnb space.techjuicelab.aishot --args --menubar
 ```
 
-## Destination app — every shot lands in one place
+## Destination app — screenshots land in one place
 
 Open **AIShot menu bar → Settings…**. Choose a preset such as Claude,
 Antigravity, ChatGPT, Codex, Gemini, or Muse (Meta), or pick any installed `.app` with
-**Choose Other…**. Once a destination is set, **every capture goes there
-regardless of which app was frontmost**.
+**Choose Other…**. Once a destination is set, **regular and scrolling screenshots
+go there regardless of which app was frontmost**. The dedicated **Copy Text from
+Screenshot…** mode always copies text to the clipboard instead.
 
 ### CLI agents in a terminal
 
@@ -318,6 +337,12 @@ open -gnb space.techjuicelab.aishot --args --capture
 No arguments still means the same one-shot capture, so existing launcher and
 Karabiner rules continue to work unchanged.
 
+For text recognition and clipboard copying, bind a separate hotkey to:
+
+```sh
+open -gnb space.techjuicelab.aishot --args --ocr
+```
+
 - **Karabiner-Elements**:
 
   ```sh
@@ -328,8 +353,10 @@ Karabiner rules continue to work unchanged.
   then enable the "AIShot" rule in Karabiner-Elements → Complex
   Modifications → Add predefined rule. Ships as <kbd>⌘⇧2</kbd> for a region and
   <kbd>⌘⇧6</kbd> for a scrolling capture — right next to the system's ⌘⇧3/4/5
-  screenshot family. A **both-<kbd>⇧</kbd>-keys-at-once** rule (Codex-style) is
-  included too — enable it as well if you like.
+  screenshot family. An optional <kbd>⌘⇧1</kbd> rule copies text from a screenshot.
+  If TextShot already uses <kbd>⌘⇧1</kbd>, enable only one of the two bindings.
+  A **both-<kbd>⇧</kbd>-keys-at-once** rule (Codex-style) is included too —
+  enable it as well if you like.
 
   <kbd>⌘⇧6</kbd> is the slot macOS reserves for capturing the Touch Bar, but
   Karabiner intercepts below the system hotkey layer so the two never meet. If
@@ -344,9 +371,12 @@ Karabiner rules continue to work unchanged.
 2. Press again → capture UI appears. On save, a **Files and Folders** prompt
    may appear for your screenshot folder (iCloud Drive / Desktop) — allow it,
    or nothing can be saved.
-3. After the first completed capture → **Accessibility** prompt (for the
+3. After the first completed regular or scrolling capture → **Accessibility** prompt (for the
    synthesized ⌘V). Until granted, AIShot still copies to the clipboard;
    once granted, pasting is automatic from the next shot on.
+
+The dedicated `--ocr` mode does not need Accessibility permission because it
+only copies text and never synthesizes <kbd>⌘V</kbd>.
 
 **Signing and permission persistence**: `build.sh` automatically uses a valid
 Keychain code-signing identity named `TechJuice Local Code Signing` when one
@@ -368,6 +398,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | Flag | Description | Default |
 |---|---|---|
 | `--capture` | run one interactive capture and exit (explicit alias for no arguments) | no-argument behavior |
+| `--ocr` | select an area, save the PNG, and copy recognized text only; ignores destination and auto-paste | — |
 | `--scroll` | pick a window and capture it top to bottom as one image | — |
 | `--window ID` | scroll-capture this window, skipping the picker (for scripts) | — |
 | `--list-windows` | print the window IDs `--window` accepts | — |
