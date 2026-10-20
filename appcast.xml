@@ -3,6 +3,28 @@
     <channel>
         <title>AIShot</title>
         <item>
+            <title>1.10.1</title>
+            <pubDate>Wed, 21 Oct 2026 03:04:19 +0900</pubDate>
+            <link>https://github.com/techjuicelab/aishot</link>
+            <sparkle:version>14</sparkle:version>
+            <sparkle:shortVersionString>1.10.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/techjuicelab/aishot/releases/download/v1.10.1/AIShot-1.10.1.zip" length="3554742" type="application/octet-stream" sparkle:edSignature="7kAWIR4HxRQLg3b7f3hy2x5cwyARFxEoxTllgMnR2NL5FFObVfJq2I+2Uc2XOQ6PTDg0aovOmtlM8DU+7RpxBw=="/>
+            <aishot:sha256>683eee72b2cfe428a148164e26f73887a34ec7a3ab95fa363cee75be63dc54a6</aishot:sha256>
+            <aishot:dmg url="https://github.com/techjuicelab/aishot/releases/download/v1.10.1/AIShot.dmg" length="3795122" sha256="28a348f15c1fdc3fb38e88b68cd951f6e3dd3e5c6c802b3345336e2d95763799" sparkle:edSignature="D4a2IH5vraVA0i6R9iZ31nbe6CpmyTDshdcq7/PRPt5MIVVHNs0801eVFzHdC9/X6Uga/LFGbMPXrVMayLHfCQ=="/>
+        </item>
+        <item>
+            <title>1.10</title>
+            <pubDate>Wed, 21 Oct 2026 02:55:59 +0900</pubDate>
+            <link>https://github.com/techjuicelab/aishot</link>
+            <sparkle:version>13</sparkle:version>
+            <sparkle:shortVersionString>1.10</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/techjuicelab/aishot/releases/download/v1.10/AIShot-1.10.zip" length="3545454" type="application/octet-stream" sparkle:edSignature="8/8pYNy3lPN9x3jN/nC3iqjmu5n3EgRlrHqem8urBIhkT3KUZ6U94U3RGff8A6bmSXbD+RnAY14WlfLeQZ5yCg=="/>
+            <aishot:sha256>0f212ab41040485846bad4360c4f13024e4e9fbddb964e266e1e4e0c52d718bb</aishot:sha256>
+            <aishot:dmg url="https://github.com/techjuicelab/aishot/releases/download/v1.10/AIShot.dmg" length="3787209" sha256="e0d1d1a42b09206fc96cd75c1bce79f4a94700826ef27cb1dbf8392a22624d5f" sparkle:edSignature="X5qRHgPXM8TZtrLAe/8ltj7DgJZkYuEUt2YTOG8RHEc/baew6AR5kM0SpcWpot9lgLHbo37gfkRvFw57G38tBQ=="/>
+        </item>
+        <item>
             <title>1.9</title>
             <pubDate>Wed, 21 Oct 2026 02:19:47 +0900</pubDate>
             <link>https://github.com/techjuicelab/aishot</link>
