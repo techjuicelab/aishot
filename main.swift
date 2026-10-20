@@ -871,6 +871,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             self?.captureFromHotkey(action)
         })
         hotkeys.start()
+        // Sparkle replaces the bundle without running --install. Perform the
+        // one-time launcher migration on that startup path as well.
+        if hotkeys.registrationFailures.isEmpty { LegacyHotkeyMigration.runIfNeeded() }
         for (action, status) in hotkeys.registrationFailures {
             log("shortcut unavailable: \(action.rawValue) (\(status)) — choose another shortcut in Settings")
         }
@@ -1135,7 +1138,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             settingsOpen = false
             Darwin.close(lock)
         }
-        presentSettings(hotkeys: hotkeys)
+        let saved = presentSettings(hotkeys: hotkeys)
+        if saved, hotkeys.registrationFailures.isEmpty { LegacyHotkeyMigration.runIfNeeded() }
         uiLanguage = currentUILanguage()
         rebuildMenu()
     }
