@@ -40,9 +40,37 @@ enum Install {
     /// The bundle this process is running out of, or nil for a bare binary —
     /// a case worth refusing rather than guessing about, since a LaunchAgent
     /// pointing into a build tree is exactly the breakage this file prevents.
+    ///
+    /// A quarantined app opened through LaunchServices may be run by Gatekeeper
+    /// from a randomized read-only mount (App Translocation) instead of where
+    /// it actually lives. That path is answered with the real location: taken
+    /// at face value, a copy translocated out of /Applications looked like a
+    /// stranger to install over its own original — and since the install
+    /// deleted the original first, the app vanished along with the very mount
+    /// it was copying from.
     static var bundlePath: String? {
-        let path = Bundle.main.bundleURL.standardizedFileURL.path
+        let url = Bundle.main.bundleURL.standardizedFileURL
+        let path = untranslocatedPath(of: url) ?? url.path
         return path.hasSuffix(".app") ? path : nil
+    }
+
+    static var isTranslocated: Bool {
+        Bundle.main.bundleURL.path.contains("/AppTranslocation/")
+    }
+
+    /// The original location behind an App Translocation mount, or nil when
+    /// `url` is not translocated or the lookup is unavailable. The Security
+    /// framework call is SPI that installers such as Sparkle rely on, so it is
+    /// looked up at run time rather than linked.
+    static func untranslocatedPath(of url: URL) -> String? {
+        guard url.path.contains("/AppTranslocation/") else { return nil }
+        typealias OriginalPath = @convention(c) (CFURL, UnsafeMutablePointer<Unmanaged<CFError>?>?)
+            -> Unmanaged<CFURL>?
+        guard let security = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY),
+              let symbol = dlsym(security, "SecTranslocateCreateOriginalPathForURL") else { return nil }
+        let originalPath = unsafeBitCast(symbol, to: OriginalPath.self)
+        guard let original = originalPath(url as CFURL, nil)?.takeRetainedValue() else { return nil }
+        return (original as URL).standardizedFileURL.path
     }
 
     /// The two places a Mac app is expected to live. `/Applications` is
@@ -152,19 +180,21 @@ enum Install {
             log("error:     \(installDir) is not writable — set AISHOT_INSTALL_DIR to a writable folder")
             return false
         }
+        // A translocated copy whose original could not be resolved may be the
+        // installed app itself. Copying it over its own source is the one move
+        // that can end with no app at all, so stop and say what to do instead.
+        if isTranslocated, bundle.contains("/AppTranslocation/") {
+            log("error:     macOS is running this copy from a temporary location (App Translocation)"
+                + " and its real location is unknown — move AIShot.app to \(installDir) in Finder"
+                + " and open it from there")
+            return false
+        }
         // The copy being replaced may be the one currently serving the menu bar.
         guard stopRunningHosts() else { return false }
-        if fm.fileExists(atPath: installedPath) {
-            do { try fm.removeItem(atPath: installedPath) } catch {
-                log("error:     could not replace \(installedPath): \(error.localizedDescription)")
-                return false
-            }
-        }
         // ditto rather than FileManager.copyItem: it is what preserves the
         // signed bundle's metadata across a copy off a read-only DMG.
-        let copied = tool("/usr/bin/ditto", [bundle, installedPath])
-        guard copied.status == 0 else {
-            log("error:     could not copy the app to \(installedPath): \(copied.output)")
+        if let failure = replaceBundle(at: installedPath, with: bundle) {
+            log("error:     \(failure)")
             return false
         }
         tool(lsregister, ["-f", installedPath])
@@ -194,6 +224,39 @@ enum Install {
         }
         proc.waitUntilExit()
         return proc.terminationStatus == 0
+    }
+
+    /// Puts a copy of `source` at `destination` without ever leaving the user
+    /// with no app: the copy is made beside the destination first, and the old
+    /// bundle is moved aside only once that copy is complete, then removed only
+    /// once the new one is in place. Returns why it failed, or nil.
+    ///
+    /// The staging names deliberately lack a `.app` extension, so LaunchServices
+    /// never registers a second bundle with the same ID while this runs.
+    static func replaceBundle(at destination: String, with source: String) -> String? {
+        let parent = (destination as NSString).deletingLastPathComponent
+        let staging = "\(parent)/.AIShot-installing-\(UUID().uuidString)"
+        let copied = tool("/usr/bin/ditto", [source, staging])
+        guard copied.status == 0, fm.isExecutableFile(atPath: staging + "/Contents/MacOS/AIShot") else {
+            try? fm.removeItem(atPath: staging)
+            return "could not copy the app to \(parent): \(copied.output)"
+        }
+        var retired: String?
+        if fm.fileExists(atPath: destination) {
+            let aside = "\(parent)/.AIShot-previous-\(UUID().uuidString)"
+            do { try fm.moveItem(atPath: destination, toPath: aside) } catch {
+                try? fm.removeItem(atPath: staging)
+                return "could not replace \(destination): \(error.localizedDescription)"
+            }
+            retired = aside
+        }
+        do { try fm.moveItem(atPath: staging, toPath: destination) } catch {
+            if let retired { try? fm.moveItem(atPath: retired, toPath: destination) }
+            try? fm.removeItem(atPath: staging)
+            return "could not put the new copy at \(destination): \(error.localizedDescription)"
+        }
+        if let retired { try? fm.removeItem(atPath: retired) }
+        return nil
     }
 
     private static func createInstallDir() -> Bool {
