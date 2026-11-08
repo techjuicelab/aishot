@@ -4,6 +4,13 @@
 #   ./release.sh 1.7             build 1.7, publish it, update the appcast
 #   ./release.sh 1.7 --dry-run   build and package into dist/ and stop there
 #
+# The Sparkle EdDSA private key is read from the login keychain, where
+# sign_update looks by default. On a Mac that keeps it only in 1Password, name
+# it instead and it is piped straight from `op` into sign_update for each
+# signature, never written to disk or to the keychain:
+#
+#   SPARKLE_ED_KEY_OP='op://Private/<item>/key.txt' ./release.sh 1.7
+#
 # Two artifacts come out of a release, and they are not interchangeable:
 #
 #   AIShot-<version>.zip   what Sparkle downloads and what scripted installers
@@ -55,6 +62,9 @@ if [ "$DRY_RUN" != "1" ]; then
     || fail "main and origin/main have diverged — push or pull first"
   gh release view "v$VERSION" -R "$REPO" >/dev/null 2>&1 \
     && fail "v$VERSION already exists on GitHub"
+fi
+if [ -n "${SPARKLE_ED_KEY_OP:-}" ]; then
+  command -v op >/dev/null 2>&1 || fail "SPARKLE_ED_KEY_OP is set but the 1Password CLI (op) is missing"
 fi
 
 CURRENT_VERSION=$(sed -n 's/^VERSION=//p' build.sh | head -1)
@@ -128,7 +138,13 @@ rm -rf AIShot.app
 # The EdDSA signature is what makes an update trustworthy: Sparkle installs a
 # download only if it verifies against the public key inside the *installed*
 # copy. The SHA-256 is for installers that are not Sparkle.
-sign_of() { "$SIGN_UPDATE" "$1" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p'; }
+sign_of() {
+  if [ -n "${SPARKLE_ED_KEY_OP:-}" ]; then
+    op read "$SPARKLE_ED_KEY_OP" | "$SIGN_UPDATE" --ed-key-file - "$1"
+  else
+    "$SIGN_UPDATE" "$1"
+  fi | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p'
+}
 size_of() { stat -f%z "$1"; }
 hash_of() { shasum -a 256 "$1" | awk '{print $1}'; }
 
