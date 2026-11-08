@@ -44,9 +44,16 @@ Full resolution order: `--out DIR` flag → the app's own folder (set by
 `--choose-dir`, or `defaults write space.techjuicelab.aishot saveDir ...`) →
 the system screenshot folder → `~/Desktop` (the macOS stock default).
 
-AIShot separates control from capture: one lightweight **menu bar host** stays
-available for destination changes, while every capture runs in its own
-short-lived process and exits as soon as the save/paste handoff is complete.
+AIShot keeps one lightweight **menu bar host** running. It owns the shortcuts
+and opens the selection overlay itself, so the crosshair is up within a few
+milliseconds of the key press instead of after an app launch. Saving and
+pasting each shot then happens in a short-lived process that exits as soon as
+the handoff is complete, so a slow destination never stalls the menu.
+
+A drag started before the overlay was on screen is not lost: AIShot holds it
+back from the window underneath and draws the same rectangle into the capture
+once the overlay is ready (this uses the Accessibility permission auto-paste
+already needs).
 
 ## Copy text from a screenshot
 
@@ -246,7 +253,10 @@ open -gnb space.techjuicelab.aishot --args --target codex
 
 For Muse, choose **Muse** in the destination menu or Settings, or use
 `--target muse`. In Automatic mode, captures paste as PNG images when Muse is
-frontmost.
+frontmost. Muse ignores ⌘V unless its message box has focus, which it often
+does not after you read a reply or switch chats, so before pasting AIShot
+clicks the text line of Muse's message box (never the **+** or send buttons)
+and puts the pointer back where it was.
 
 Preview what your current setup would do with `--self-test`.
 
@@ -294,7 +304,10 @@ identity and the menu bar item resolve ambiguously.
 A copy started from anywhere else — the mounted DMG itself, `~/Downloads` —
 moves itself into the install directory before doing anything else. A
 LaunchAgent may only point at a bundle that will still be there once the volume
-is ejected.
+is ejected. The new copy is made next to the old one first and only then
+swapped in, so a failed copy never leaves you without the app. A copy that
+macOS runs from a temporary location (App Translocation) is recognized by its
+real path instead of being installed over itself.
 
 **Upgrading from an earlier install**: the bundle ID changed from
 `com.techjuicelab.aishot` to `space.techjuicelab.aishot`. macOS can wedge a
@@ -363,7 +376,10 @@ open -gnb space.techjuicelab.aishot --args --scroll
 open -gnb space.techjuicelab.aishot --args --ocr
 ```
 
-Launching without arguments still starts a one-shot regular capture.
+Launching without arguments starts the menu bar host when it is not running
+(opening the app from Finder or Spotlight, or the relaunch after macOS's
+"Quit & Reopen" permission prompt) and otherwise starts a one-shot regular
+capture, as before.
 
 ## First-run permissions (one-time)
 
@@ -398,7 +414,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 
 | Flag | Description | Default |
 |---|---|---|
-| `--capture` | run one interactive capture and exit (explicit alias for no arguments) | no-argument behavior |
+| `--capture` | run one interactive capture and exit (explicit alias for no arguments while the host is running) | no-argument behavior |
 | `--ocr` | select an area, save the PNG, and copy recognized text only; ignores destination and auto-paste | — |
 | `--scroll` | pick a window and capture it top to bottom as one image | — |
 | `--window ID` | scroll-capture this window, skipping the picker (for scripts) | — |
@@ -414,6 +430,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | `--timeout SEC` | how long the selection UI may wait | `300` |
 | `--self-test` | print folder / frontmost app / permission state and exit | — |
 | `--install` | wire this copy up — install it, register the LaunchAgent, start the host — and exit | what `build.sh` and install scripts call |
+| `--deliver PNG` | save, recognize and paste an existing capture without opening a capture UI | what the menu bar host calls after its own capture |
 
 ## Customize
 

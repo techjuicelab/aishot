@@ -11,8 +11,10 @@
 //   configured app      → launch/activate it and paste there every time
 //   anything else       → clipboard only, no keystroke
 //   --ocr               → recognize Korean/English and copy text only
-// Capture workers exit immediately after each shot. A lightweight --menubar
-// host provides quick destination switching and launches those workers.
+// A lightweight --menubar host owns the shortcuts and opens the region capture
+// itself (RegionCapture.swift); a short-lived worker launched with --deliver
+// then saves, routes and pastes the shot and exits. External launchers
+// (--capture, --ocr) and scrolling captures still run as one worker each.
 // Log: /tmp/aishot.log
 
 import AppKit
@@ -187,6 +189,18 @@ func log(_ msg: String) {
     print(msg)
 }
 
+/// Waits while still servicing the run loop — NSWorkspace state, event taps
+/// and main-queue callbacks keep flowing. `RunLoop.run(mode:before:)` returns
+/// at once when the loop has no sources, so fall back to sleeping then.
+func pauseServicingRunLoop(_ seconds: TimeInterval) {
+    let deadline = Date(timeIntervalSinceNow: seconds)
+    while Date() < deadline {
+        if !RunLoop.current.run(mode: .default, before: min(deadline, Date(timeIntervalSinceNow: 0.02))) {
+            usleep(10_000)
+        }
+    }
+}
+
 func fail(_ msg: String) -> Never {
     log("ERROR: \(msg)")
     exit(1)
@@ -232,6 +246,9 @@ var targetRaw: String? // --target alias|bundle-id: force the destination for th
 var assumeFrontRaw: String? // --assume-front bundle-id: the app the menu host saw
 var installOnly = false // --install: wire this copy up and exit, installing nothing else
 var announceInstall = false // --announce: confirm a GUI first run with an alert
+// --deliver PATH: the menu bar host already ran the region capture; save,
+// recognize and paste this file without opening a capture UI of its own.
+var deliverPath: String?
 
 var argIt = CommandLine.arguments.dropFirst().makeIterator()
 while let arg = argIt.next() {
@@ -273,12 +290,16 @@ while let arg = argIt.next() {
         scrollMode = true
     case "--install":    installOnly = true
     case "--announce":   announceInstall = true
+    case "--deliver":
+        guard let value = argIt.next() else { fail("--deliver requires a PNG path") }
+        deliverPath = (value as NSString).expandingTildeInPath
     case "--capture":    break // explicit alias for the default one-shot capture mode
     default:             fail("unknown flag: \(arg)")
     }
 }
 guard ["auto", "path", "image"].contains(mode) else { fail("--mode must be auto|path|image") }
 guard !(ocrMode && scrollMode) else { fail("--ocr cannot be combined with scrolling capture") }
+guard !(deliverPath != nil && scrollMode) else { fail("--deliver cannot be combined with scrolling capture") }
 
 // MARK: - updater relaunch
 
@@ -359,6 +380,24 @@ if mayAutoInstall, Install.needsInstall() {
     // Already in the right place with only the LaunchAgent missing: wire it up
     // and carry on with whatever this run was asked to do.
     Install.run(announce: false)
+}
+
+// An argument-less launch while no menu bar host is running becomes the host.
+// macOS produces exactly that launch after "Quit & Reopen" in the Screen
+// Recording prompt: the host is quit cleanly — so its LaunchAgent, which only
+// restarts crashes, leaves it down — and the reopen carries no arguments. Read
+// as a one-shot capture it threw a crosshair at the user and left the session
+// without the host, and therefore without any shortcut, until the next login.
+// Opening the app from Finder or Spotlight lands here too, where starting it
+// is the expected result. With a host running, no arguments still means a
+// capture, as it always has for external launchers.
+var preacquiredHostLock: Int32?
+if !showMenuBar, CommandLine.arguments.count == 1,
+   let bundle = Install.bundlePath, bundle == Install.installedPath,
+   let lock = acquireProcessLock("menubar") {
+    preacquiredHostLock = lock
+    showMenuBar = true
+    log("opened without arguments while no menu bar host was running — starting the host")
 }
 
 // MARK: - environment
@@ -837,6 +876,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var settingsOpen = false
     private var settingsScheduled = false
 
+    // The region capture runs here, in the process that is already up when the
+    // shortcut fires, so the selection overlay appears without first launching
+    // an app — that launch measured 50–330 ms, long enough for a quick drag to
+    // start on the window underneath. Saving and pasting still happen in a
+    // short-lived worker (--deliver), so a slow destination never stalls the
+    // menu or the shortcuts.
+    private var regionCapture: RegionCaptureSession?
+    private var regionCaptureLock: Int32?
+    private var deliveryStartedAt: Date?
+    private var deliveryPID: pid_t?
+
     #if canImport(Sparkle)
     // The menu bar host is the only long-lived AIShot process — capture workers
     // exit within seconds of doing their job — so it is the one that owns update
@@ -1071,26 +1121,110 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(item)
     }
 
-    private func launchSibling(arguments: [String], activates: Bool) {
+    private func launchSibling(arguments: [String], activates: Bool,
+                               launched: ((NSRunningApplication?) -> Void)? = nil) {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.arguments = arguments
         configuration.activates = activates
         configuration.addsToRecentItems = false
         configuration.createsNewApplicationInstance = true
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL,
-                                           configuration: configuration) { _, error in
+                                           configuration: configuration) { app, error in
             if let error { log("could not open AIShot \(arguments.joined(separator: " ")): \(error)") }
+            if let launched { DispatchQueue.main.async { launched(app) } }
         }
     }
 
     @objc private func captureScreenshot(_ sender: Any?) {
-        var arguments = ["--capture"]
+        startRegionCapture(ocr: false)
+    }
+
+    @objc private func copyScreenshotText(_ sender: Any?) {
+        startRegionCapture(ocr: true)
+    }
+
+    /// A worker launched for the previous shot that is still saving or
+    /// pasting. A new capture must wait for it: its overlay would cover the
+    /// destination being activated, and its clipboard write would race the
+    /// paste. Bounded so a wedged worker cannot block captures for good.
+    private var deliveryInProgress: Bool {
+        guard let started = deliveryStartedAt, Date().timeIntervalSince(started) < 30 else { return false }
+        guard let pid = deliveryPID else { return Date().timeIntervalSince(started) < 5 } // still launching
+        return NSRunningApplication(processIdentifier: pid).map { !$0.isTerminated } ?? false
+    }
+
+    /// The capture as a fresh worker process, the way every capture used to
+    /// run. Kept for states a long-lived process can misjudge: macOS applies a
+    /// newly granted Screen Recording permission to processes started after the
+    /// grant, and a new process is also what raises the Files & Folders prompt.
+    private func launchCaptureWorker(ocr: Bool) {
+        var arguments = [ocr ? "--ocr" : "--capture"]
         if let lastExternalFront { arguments += ["--assume-front", lastExternalFront] }
         launchSibling(arguments: arguments, activates: false)
     }
 
-    @objc private func copyScreenshotText(_ sender: Any?) {
-        launchSibling(arguments: ["--ocr"], activates: false)
+    private func startRegionCapture(ocr: Bool) {
+        guard !settingsOpen else { return }
+        guard regionCapture == nil, !deliveryInProgress else {
+            log("capture already in progress — ignored duplicate trigger")
+            return
+        }
+        guard CGPreflightScreenCaptureAccess() else {
+            launchCaptureWorker(ocr: ocr)
+            return
+        }
+        // The cross-process lock that scrolling captures and external launchers
+        // also take, so none of them can open a second capture over this one.
+        guard let lock = acquireProcessLock("capture") else {
+            log("capture already in progress — ignored duplicate trigger")
+            return
+        }
+        // This process outlives any `defaults write` or change to the system
+        // screenshot location; read both as they are now, not as cached.
+        CFPreferencesAppSynchronize(preferencesDomain)
+        CFPreferencesAppSynchronize("com.apple.screencapture" as CFString)
+        guard let path = prepareScreenshotPath(in: screenshotFolder()) else {
+            Darwin.close(lock)
+            launchCaptureWorker(ocr: ocr)
+            return
+        }
+        let front = lastExternalFront
+        let session = RegionCaptureSession(path: path, timeout: 300)
+        do {
+            try session.start { [weak self] status in
+                self?.regionCaptureFinished(path: path, ocr: ocr, front: front, status: status)
+            }
+        } catch {
+            Darwin.close(lock)
+            log("cannot run screencapture: \(error)")
+            return
+        }
+        regionCapture = session
+        regionCaptureLock = lock
+    }
+
+    private func regionCaptureFinished(path: String, ocr: Bool, front: String?, status: Int32) {
+        regionCapture = nil
+        if let regionCaptureLock { Darwin.close(regionCaptureLock) }
+        regionCaptureLock = nil
+        guard fm.fileExists(atPath: path) else {
+            log("nothing captured (screencapture exit \(status)) — Esc pressed, or capture failed")
+            return
+        }
+        var arguments = ["--deliver", path]
+        if ocr { arguments.append("--ocr") }
+        if let front { arguments += ["--assume-front", front] }
+        deliveryStartedAt = Date()
+        deliveryPID = nil
+        launchSibling(arguments: arguments, activates: false) { [weak self] app in
+            guard let self else { return }
+            if let app {
+                self.deliveryPID = app.processIdentifier
+            } else {
+                self.deliveryStartedAt = nil
+                log("the capture is saved at \(path) but could not be pasted")
+            }
+        }
     }
 
     @objc private func captureScrollingScreenshot(_ sender: Any?) {
@@ -1218,7 +1352,7 @@ final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 if showMenuBar {
-    guard let hostLockFD = acquireProcessLock("menubar") else {
+    guard let hostLockFD = preacquiredHostLock ?? acquireProcessLock("menubar") else {
         log("menu bar is already running")
         exit(0)
     }
@@ -1462,13 +1596,132 @@ func isClaudePrompt(_ element: AXUIElement) -> Bool {
         || placeholder?.caseInsensitiveCompare("Prompt") == .orderedSame
 }
 
+let claudeBundleID = "com.anthropic.claudefordesktop"
+let museBundleID = "com.meta.endo"
+
+// Some destinations activate with focus somewhere other than their message
+// box, and then accept ⌘V and drop it. Help the two known ones find their
+// composer; leave every other app's existing focus untouched.
+func focusDestinationComposer(_ app: NSRunningApplication) -> Bool {
+    switch app.bundleIdentifier {
+    case claudeBundleID: return focusClaudePrompt(app)
+    case museBundleID: return focusMuseComposer(app)
+    default: return true
+    }
+}
+
+func axFrame(_ element: AXUIElement) -> CGRect? {
+    var rawPosition: CFTypeRef?
+    var rawSize: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &rawPosition) == .success,
+          AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &rawSize) == .success,
+          let rawPosition, let rawSize,
+          CFGetTypeID(rawPosition) == AXValueGetTypeID(),
+          CFGetTypeID(rawSize) == AXValueGetTypeID() else { return nil }
+    var position = CGPoint.zero
+    var size = CGSize.zero
+    guard AXValueGetValue(unsafeBitCast(rawPosition, to: AXValue.self), .cgPoint, &position),
+          AXValueGetValue(unsafeBitCast(rawSize, to: AXValue.self), .cgSize, &size) else { return nil }
+    return CGRect(origin: position, size: size)
+}
+
+func axElementAttribute(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {
+    var raw: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute as CFString, &raw) == .success,
+          let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+    return unsafeBitCast(raw, to: AXUIElement.self)
+}
+
+// Muse (Meta) draws its composer in a WKWebView, inside an element WebKit
+// exposes as one button — "Message · Attach file · Send". The text editor in
+// it is hidden from Accessibility, so it cannot be focused the way Claude's
+// prompt is, and pressing that button is the same as clicking "Attach file":
+// it opens a file picker. Whenever the editor is not focused — after reading
+// a reply, switching chats, or coming back from another app — Muse takes ⌘V
+// and drops it. Measured: 0 of 4 pastes landed without focus, 4 of 4 with it.
+//
+// What works is what the user would do by hand: click the composer's text
+// row. The click goes on the bottom row (attachments stack above it and make
+// the composer taller), right of "+" and left of the mic and send buttons,
+// only after confirming that Muse is what sits under that point, and the
+// pointer is put back where it was.
+func focusMuseComposer(_ app: NSRunningApplication) -> Bool {
+    let axApp = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetMessagingTimeout(axApp, 0.3)
+    guard let window = axElementAttribute(axApp, kAXFocusedWindowAttribute)
+            ?? axElementAttribute(axApp, kAXMainWindowAttribute),
+          let windowFrame = axFrame(window) else {
+        log("could not find Muse's window to focus its composer")
+        return false
+    }
+
+    // The composer: the lowest wide button along the bottom edge of the
+    // window. Located by geometry because its title changes with the chat,
+    // the attachments and Muse's language.
+    let band = windowFrame.maxY - 220
+    var composer: CGRect?
+    var stack = [window]
+    var inspected = 0
+    let deadline = Date(timeIntervalSinceNow: 1.5)
+    while let element = stack.popLast(), inspected < 2000, Date() < deadline {
+        inspected += 1
+        AXUIElementSetMessagingTimeout(element, 0.2)
+        guard let frame = axFrame(element) else { continue }
+        if frame.maxY < band { continue } // nothing inside can reach the bottom edge
+        if axString(element, attribute: kAXRoleAttribute as CFString) == (kAXButtonRole as String) {
+            if frame.width >= max(240, windowFrame.width * 0.3), frame.height >= 30,
+               frame.maxY <= windowFrame.maxY + 1,
+               composer.map({ frame.maxY > $0.maxY }) ?? true {
+                composer = frame
+            }
+            continue // a button's children are presentational
+        }
+        var rawChildren: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &rawChildren) == .success,
+           let children = rawChildren as? [AXUIElement] {
+            stack.append(contentsOf: children)
+        }
+    }
+    guard let composer else {
+        log("could not find Muse's composer — pasting into its current focus")
+        return false
+    }
+
+    let point = CGPoint(x: max(composer.minX + 60, composer.maxX - 140),
+                        y: composer.maxY - min(29, composer.height / 2))
+    let systemWide = AXUIElementCreateSystemWide()
+    AXUIElementSetMessagingTimeout(systemWide, 0.3)
+    var hit: AXUIElement?
+    var hitPID: pid_t = 0
+    guard AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &hit) == .success,
+          let hit, AXUIElementGetPid(hit, &hitPID) == .success,
+          hitPID == app.processIdentifier else {
+        log("Muse's composer is covered by another window — pasting into its current focus")
+        return false
+    }
+
+    let pointer = CGEvent(source: nil)?.location
+    let source = CGEventSource(stateID: .hidSystemState)
+    for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+        guard let click = CGEvent(mouseEventSource: source, mouseType: type,
+                                  mouseCursorPosition: point, mouseButton: .left) else { return false }
+        click.flags = [] // a ⌘ still held from the shortcut must not make it a ⌘-click
+        click.post(tap: .cghidEventTap)
+        usleep(30_000)
+    }
+    if let pointer {
+        CGWarpMouseCursorPosition(pointer)
+        CGAssociateMouseAndMouseCursorPosition(1)
+    }
+    // Let WebKit move focus into the editor before ⌘V arrives.
+    pauseServicingRunLoop(0.15)
+    return true
+}
+
 // Claude's Electron window frequently activates with its web content focused
 // instead of the composer. In that state ⌘V is accepted by the process but
-// discarded. Locate only Claude's explicitly-labelled Prompt field, focus it,
-// and leave every other app's existing focus untouched.
-func focusDestinationComposer(_ app: NSRunningApplication) -> Bool {
-    guard app.bundleIdentifier == "com.anthropic.claudefordesktop" else { return true }
-
+// discarded. Locate only Claude's explicitly-labelled Prompt field and focus it.
+func focusClaudePrompt(_ app: NSRunningApplication) -> Bool {
     let axApp = AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(axApp, 0.2)
     var rawFocused: CFTypeRef?
@@ -1647,47 +1900,49 @@ if chooseDir {
 
 // An older launcher may still send a capture command while the shortcut
 // recorder is open. Do not let it interrupt editing with a capture overlay.
-guard let settingsProbe = acquireProcessLock("settings") else {
-    log("settings are open — ignored capture trigger")
-    exit(0)
+// A --deliver run comes after a capture that has already happened.
+if deliverPath == nil {
+    guard let settingsProbe = acquireProcessLock("settings") else {
+        log("settings are open — ignored capture trigger")
+        exit(0)
+    }
+    Darwin.close(settingsProbe)
 }
-Darwin.close(settingsProbe)
 
-guard acquireProcessLock("capture") != nil else {
+// Held until this process exits, which covers the paste as well as the
+// capture. The host releases the lock only just before it launches a
+// --deliver worker, so that worker waits briefly for it instead of giving up.
+var captureLock = acquireProcessLock("capture")
+if captureLock == nil, deliverPath != nil {
+    let deadline = Date(timeIntervalSinceNow: 2)
+    while captureLock == nil, Date() < deadline {
+        usleep(50_000)
+        captureLock = acquireProcessLock("capture")
+    }
+}
+guard captureLock != nil else {
     log("capture already in progress — ignored duplicate trigger")
     exit(0)
 }
 
-// Without Screen Recording the shot would silently miss window contents and
-// the capture UI would race the permission dialog — prompt and bail instead;
-// the next hotkey press runs a fresh process with the grant in effect.
-if !CGPreflightScreenCaptureAccess() {
-    log("screen-recording not granted — requesting; allow in System Settings, then press the hotkey again")
-    _ = CGRequestScreenCaptureAccess()
-    exit(0)
-}
-
-let dir = screenshotFolder()
-try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-
-// Probe writability up front: surfaces the Files & Folders (iCloud Drive /
-// Desktop) prompt before the capture UI, and unmasks a denied grant that
-// would otherwise look like an Esc-cancelled capture.
-let probe = dir + "/.aishot-write-test"
-if !fm.createFile(atPath: probe, contents: Data()) {
-    fail("cannot write to \(dir) — allow AIShot under System Settings → Privacy & Security → Files and Folders")
-}
-try? fm.removeItem(atPath: probe)
-
-let df = DateFormatter()
-df.locale = Locale(identifier: "en_US_POSIX")
-df.dateFormat = "yyyy-MM-dd 'at' h.mm.ss a"
-let stamp = df.string(from: Date())
-var savePath = "\(dir)/Screenshot \(stamp).png"
-var serial = 2
-while fm.fileExists(atPath: savePath) {
-    savePath = "\(dir)/Screenshot \(stamp) (\(serial)).png"
-    serial += 1
+let savePath: String
+if let deliverPath {
+    guard fm.fileExists(atPath: deliverPath) else { fail("--deliver: no capture at \(deliverPath)") }
+    savePath = deliverPath
+} else {
+    // Without Screen Recording the shot would silently miss window contents and
+    // the capture UI would race the permission dialog — prompt and bail instead;
+    // the next hotkey press runs a fresh process with the grant in effect.
+    if !CGPreflightScreenCaptureAccess() {
+        log("screen-recording not granted — requesting; allow in System Settings, then press the hotkey again")
+        _ = CGRequestScreenCaptureAccess()
+        exit(0)
+    }
+    let dir = screenshotFolder()
+    guard let path = prepareScreenshotPath(in: dir) else {
+        fail("cannot write to \(dir) — allow AIShot under System Settings → Privacy & Security → Files and Folders")
+    }
+    savePath = path
 }
 
 // What a scrolling capture puts on the clipboard, decided by the scrollOcrMode
@@ -1916,19 +2171,17 @@ if scrollMode {
                       "✓  Scrolling capture complete — \(result.frameCount) frames · \(size)"))
         }
     }
-} else {
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-    proc.arguments = ["-i", savePath]
-    do { try proc.run() } catch { fail("cannot run screencapture: \(error)") }
-
-    let watchdog = DispatchWorkItem { proc.terminate() }
-    DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
-    proc.waitUntilExit()
-    watchdog.cancel()
+} else if deliverPath == nil {
+    // The same session the menu bar host runs, for captures started by an
+    // external launcher (`--capture`, `--ocr`) or by the host's fallback.
+    let session = RegionCaptureSession(path: savePath, timeout: timeout)
+    var captureStatus: Int32?
+    do { try session.start { captureStatus = $0 } } catch { fail("cannot run screencapture: \(error)") }
+    while captureStatus == nil { pauseServicingRunLoop(0.05) }
+    withExtendedLifetime(session) {}
 
     guard fm.fileExists(atPath: savePath) else {
-        log("nothing captured (screencapture exit \(proc.terminationStatus)) — Esc pressed, or capture failed")
+        log("nothing captured (screencapture exit \(captureStatus ?? -1)) — Esc pressed, or capture failed")
         exit(0)
     }
 }
@@ -2091,22 +2344,30 @@ guard waitUntilFinishedLaunching(dest) else {
 }
 
 // Bring the destination forward, then focus its composer when an app-specific
-// target (currently Claude) needs help restoring the correct input field.
+// target (Claude, Muse) needs help restoring the correct input field.
 // Neither step is a precondition for the paste: ⌘V is delivered straight to the
 // destination's process, so a refused activation or an accessibility tree that
 // is too large to walk must not cost the user the paste — only the visual
 // hand-off. Both used to abort the run, which is why long Claude conversations
 // silently ended as clipboard-only.
+let destinationWasFrontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
+    == dest.processIdentifier
 if !activateDestination(dest) {
     log("destination did not become frontmost — sending ⌘V to it directly")
+} else if !destinationWasFrontmost {
+    // Its window is still coming forward; a composer click or ⌘V sent in the
+    // middle of that lands on whatever had focus before.
+    pauseServicingRunLoop(0.15)
 }
 if !focusDestinationComposer(dest) {
     log("could not focus the destination composer — pasting into its current focus")
 }
 
-usleep(route.app == nil ? 500_000 : 120_000) // extra time after a cold launch
+// Serviced rather than slept, so the frontmost check below sees the current
+// state instead of a value NSWorkspace last refreshed before the activation.
+pauseServicingRunLoop(route.app == nil ? 0.5 : 0.12) // extra time after a cold launch
 var captureChangeCount = copyCaptureToPasteboard()
-usleep(80_000) // let the pasteboard settle
+pauseServicingRunLoop(0.08) // let the pasteboard settle
 
 // A user copy or another AIShot invocation must never be mistaken for this
 // capture. Clipboard managers, however, routinely touch the pasteboard right
@@ -2142,10 +2403,12 @@ guard postPasteShortcut(to: dest) else {
     exit(0)
 }
 let targetName = dest.localizedName ?? dest.bundleIdentifier ?? "?"
+// "Sent", not "pasted": whether the app accepted ⌘V is not observable from
+// here, and a log that claimed success hid every dropped Muse paste.
 if destinationIsFrontmost {
-    log("pasted \(deliveredKind) into \(targetName)")
+    log("sent \(deliveredKind) paste (⌘V) to \(targetName)")
 } else {
-    log("sent \(deliveredKind) paste directly to \(targetName) after focus moved away")
+    log("sent \(deliveredKind) paste (⌘V) to \(targetName) after focus moved away")
 }
 // doublePaste only makes sense on top of an image paste — in path mode the
 // destination is a terminal that got the file path, and the sidecar .txt sits
