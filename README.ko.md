@@ -24,6 +24,10 @@
 | 목적지 **Automatic** + 최전면 터미널·IDE — Ghostty, Terminal, iTerm2, kitty, WezTerm, Warp, VS Code, Antigravity, Cursor | 최전면 앱 | Paste as **Automatic**일 때: 이스케이프된 **파일 경로** + 자동 ⌘V |
 | 목적지 **Automatic** + 최전면 AI 앱·브라우저 — Claude, Codex, ChatGPT, Gemini, Muse, Safari, Chrome | 최전면 앱 | Paste as **Automatic**일 때: **PNG 이미지** + 자동 ⌘V |
 | 목적지 **Automatic** + 그 외 모든 앱 | 클립보드 복사만 하고 ⌘V는 보내지 않음 | Paste as **Automatic**일 때: 수동으로 붙여넣을 수 있는 **PNG 이미지** |
+| **Dropover shelf** ([Dropover](https://dropoverapp.com) 설치 시) | Dropover shelf. 붙여넣지 않고 클립보드도 건드리지 않음 | 캡처 **파일** 자체 |
+
+어느 목적지든 **Dropover shelf에도 넣기**를 켜면 붙여넣기는 그대로 하고 캡처 파일을
+Dropover shelf에도 담는다([아래](#dropover-shelf)).
 
 모든 캡처는 macOS 기본 파일명(`Screenshot 2026-07-08 at 11.09.27 AM.png`)의
 **파일로도 저장**되므로 붙여넣기와 아카이빙이 한 동작에 끝난다.
@@ -65,6 +69,19 @@ open -gnb space.techjuicelab.aishot --args --ocr
 이 전용 모드는 목적지와 자동 붙여넣기 설정을 무시한다. 앱을 열거나 자동으로
 붙여넣지 않으며, PNG는 기존 스크린샷 폴더에 그대로 저장한다. <kbd>Esc</kbd>로
 취소하거나 인식된 글자가 없으면 기존 클립보드를 유지한다.
+
+읽는 순서는 화면 배치를 따른다. 두 열로 나뉜 페이지는 왼쪽 열을 끝까지 읽은 뒤
+오른쪽 열로 넘어가고(이전에는 두 열의 줄이 한 줄씩 섞였다), 한 행에 나란히 놓인
+조각 — 표의 칸, 이름과 시간, 라벨과 값 — 은 한 줄로 합친다(넓은 간격은 탭이라
+표를 스프레드시트에 붙여넣으면 칸이 유지된다). 문단 사이와 열이 바뀌는 곳에는 빈
+줄이 들어간다. Vision이 같은 줄을 두 번 읽은 흔적(화면 가장자리에 닿은 줄 위에
+겹친 낮은 신뢰도의 결과)은 버린다.
+
+인식은 보통 1초가 안 걸리지만, **macOS 업데이트 직후 첫 인식은 Vision이 모델을 다시
+컴파일하느라 20초 안팎** 걸린다(모델 캐시가 macOS 빌드별로 따로 있다). AIShot은
+로그인할 때 이 컴파일을 미리 해 두고, 그래도 인식이 길어지면 화면 위쪽에 **텍스트
+인식 중…**을 띄운다. 그 표시가 사라지고 `✓ 텍스트 복사 완료`가 뜬 뒤에 붙여넣으면
+된다.
 
 ## 스크롤 캡처 — 창 전체를 한 장으로
 
@@ -141,6 +158,8 @@ defaults write space.techjuicelab.aishot scrollMaxFrames -int 120   # 기본 60
 - **Destination: _현재 앱_** — **Automatic (Frontmost App)**과 설치된 프리셋
   사이를 빠르게 전환. 현재 선택에는 체크 표시가 붙고,
   **More Destinations in Settings…**에서 전체 선택창을 연다.
+- **Dropover shelf에도 넣기** — Dropover가 설치돼 있을 때만 보인다. 켜면 붙여넣기에
+  더해 캡처 파일을 Dropover shelf에도 담는다.
 - **Settings…** — 어떤 앱이든 목적지로 고르고 붙여넣기 형식, 목적지 자동 실행,
   포커스 복귀와 앱 자체 단축키를 설정하는 기본 진입점.
 - **Open Screenshot Folder** — 현재 AIShot 저장 폴더 열기.
@@ -181,6 +200,25 @@ CLI 에이전트에는 자기 번들 ID가 없으므로 주소 역할은 터미�
 바로 보내기**를 켠다. 경로 모드의 터미널에만 적용된다 — VS Code 같은 편집기에서
 Enter는 그냥 파일 안의 줄바꿈이기 때문이다.
 
+### Dropover shelf
+
+[Dropover](https://dropoverapp.com)는 파일을 화면에 떠 있는 shelf에 모아 두는 앱이다.
+붙여넣을 입력창이 없으므로 AIShot은 캡처 **파일**을 Dropover에 넘긴다. Dropover를
+앞으로 가져오지 않아 지금 쓰던 앱의 포커스는 그대로다.
+
+- **shelf에만 담기** — 목적지 목록 맨 아래 **Shelf** 구역의 **Dropover shelf**를
+  고른다. 어디서 찍든 캡처는 shelf로만 가고, 붙여넣기는 하지 않으며 **클립보드도
+  건드리지 않는다** — 여러 장을 모아 두었다가 나중에 끌어다 쓰는 동안 마지막으로
+  복사한 내용을 잃지 않는다.
+- **붙여넣고 shelf에도 담기** — 설정 또는 메뉴 막대에서 **Dropover shelf에도
+  넣기**를 켠다. 평소처럼 목적지에 붙여넣은 뒤 같은 파일을 shelf에도 담는다.
+  붙여넣기 대신 클립보드 복사로 끝난 경우에도 shelf에는 들어간다.
+
+캡처마다 새 shelf를 열지, 화면에 떠 있는 shelf에 이어서 쌓을지는 Dropover의
+**Settings → Shelf → Adding Files Behavior**가 정한다. 기본값은 **Show in New
+Shelf**이고, **Add to Visible Shelf**로 바꾸면 연속으로 찍은 캡처가 한 shelf에
+모인다. 텍스트 복사(<kbd>⌘⇧1</kbd>)는 이 설정과 무관하게 텍스트만 클립보드에 복사한다.
+
 같은 설정창에서 다음 항목도 고를 수 있다:
 
 - **Paste as**: **Automatic**은 알려진 터미널·IDE 목적지에는 파일 경로를,
@@ -219,13 +257,19 @@ defaults write space.techjuicelab.aishot returnFocus -bool true
 # 선택: 터미널에 경로를 붙여넣은 뒤 Enter를 눌러 CLI 에이전트에 바로 넘기기
 defaults write space.techjuicelab.aishot pasteSubmit -bool true
 
+# 선택: 붙여넣은 뒤 캡처 파일을 Dropover shelf에도 담기
+defaults write space.techjuicelab.aishot dropoverAlso -bool true
+
+# Dropover shelf에만 담기 (붙여넣기·클립보드 없음)
+defaults write space.techjuicelab.aishot targetApp dropover
+
 # 목적지를 Automatic으로 복원
 defaults delete space.techjuicelab.aishot targetApp
 ```
 
 목적지 별칭: `claude` · `codex` · `chatgpt` · `gemini` · `muse` · `antigravity` ·
 `antigravity-ide` · `cursor` · `vscode` · `safari` · `chrome` · `ghostty` ·
-`iterm` · `terminal` · `wezterm` · `kitty` · `warp`. 그 외 앱은
+`iterm` · `terminal` · `wezterm` · `kitty` · `warp` · `dropover`. 그 외 앱은
 선택창에서 고르거나 번들 ID로 지정한다
 (`osascript -e 'id of app "SomeApp"'`).
 
@@ -408,6 +452,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | `--self-test` | 폴더·최전면 앱·권한 상태만 출력하고 종료 | — |
 | `--install` | 이 복사본을 설치 위치로 배선 — 설치·LaunchAgent 등록·호스트 시작 후 종료 | `build.sh`와 설치 스크립트가 호출 |
 | `--deliver PNG` | 이미 찍은 캡처를 선택 화면 없이 저장·인식·붙여넣기 | 메뉴 막대 호스트가 자체 캡처 뒤 호출 |
+| `--warm-ocr` | 텍스트 인식 모델을 미리 컴파일하고 종료(느린 건 macOS 업데이트 직후뿐) | 메뉴 막대 호스트가 시작할 때 호출 |
 
 ## 커스터마이즈
 
