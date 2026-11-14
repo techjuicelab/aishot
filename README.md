@@ -24,6 +24,10 @@ to the destination you chose from the [menu bar or Settings](#menu-bar):
 | Destination **Automatic** + a frontmost terminal or IDE — Ghostty, Terminal, iTerm2, kitty, WezTerm, Warp, VS Code, Antigravity, Cursor | the frontmost app | with Paste as **Automatic**: escaped **file path** + auto ⌘V |
 | Destination **Automatic** + a frontmost AI app or browser — Claude, Codex, ChatGPT, Gemini, Muse, Safari, Chrome | the frontmost app | with Paste as **Automatic**: the **PNG itself** + auto ⌘V |
 | Destination **Automatic** + anything else | clipboard only; no ⌘V is sent | with Paste as **Automatic**: the **PNG itself**, ready to paste manually |
+| **Dropover shelf** (with [Dropover](https://dropoverapp.com) installed) | a Dropover shelf; nothing is pasted and the clipboard is left alone | the capture **file** itself |
+
+With any destination, **Also add each capture to a Dropover shelf** keeps the
+paste and puts the capture file in a Dropover shelf as well ([below](#dropover-shelf)).
 
 Every capture is also **saved as a file** with the native macOS naming
 (`Screenshot 2026-07-08 at 11.09.27 AM.png`), so pasting and archiving happen
@@ -70,6 +74,20 @@ This dedicated mode ignores the destination and automatic paste settings: it
 does not open an app or paste automatically. The PNG is still saved in your
 usual screenshot folder. Cancelling with <kbd>Esc</kbd> or capturing an area
 where no text is recognized leaves the existing clipboard untouched.
+
+The text follows the layout. A page in two columns is read down the left
+column and then the right (it used to interleave them line by line), pieces
+that share a row — table cells, a name and a time, a label and its value — are
+joined on one line (wide gaps become tabs, so a table pasted into a spreadsheet
+keeps its cells), and a blank line marks a paragraph gap or the start of the
+next column. A second, low-confidence reading Vision sometimes reports on top
+of a line touching the edge of the capture is dropped.
+
+Recognition normally takes under a second, but **the first one after a macOS
+update takes around 20 s** while Vision recompiles its models (their cache is
+kept per macOS build). AIShot does that compile at login, and if recognition
+still runs long, **Reading text…** appears near the top of the screen; paste
+once it gives way to `✓ Text copied`.
 
 ## Scrolling capture — a whole window in one image
 
@@ -154,6 +172,8 @@ for:
 - **Destination: _current app_** — quickly switch between **Automatic
   (Frontmost App)** and installed presets. The current choice has a checkmark;
   **More Destinations in Settings…** opens the full picker.
+- **Also Add to Dropover Shelf** — shown when Dropover is installed. When on,
+  every capture also goes into a Dropover shelf after the paste.
 - **Settings…** — the normal entry point for choosing any app and configuring
   paste format, destination auto-open, focus return, and built-in shortcuts.
 - **Open Screenshot Folder** — opens the folder AIShot currently saves into.
@@ -195,6 +215,27 @@ immediately instead, turn on **Press Return after pasting a path into a
 terminal** in Settings. It applies only to terminals in path mode — in an
 editor like VS Code a Return would just be a newline in the file.
 
+### Dropover shelf
+
+[Dropover](https://dropoverapp.com) keeps files in floating shelves. It has no
+composer to paste into, so AIShot hands it the capture **file** — in the
+background, without bringing Dropover forward, so focus stays where it was.
+
+- **Shelf only** — choose **Dropover shelf** under **Shelf** at the bottom of
+  the destination list. Every capture goes into a shelf and nowhere else:
+  nothing is pasted and **the clipboard is left alone**, so collecting a few
+  shots to drag somewhere later does not cost you what you copied last.
+- **Paste and shelve** — turn on **Also add each capture to a Dropover shelf**
+  in Settings or the menu bar. The capture is pasted into the destination as
+  usual, then the same file goes into a shelf too — also when the run ended
+  with a clipboard copy instead of a paste.
+
+Whether each capture opens a new shelf or joins one already on screen is
+Dropover's call: **Settings → Shelf → Adding Files Behavior**. The default,
+**Show in New Shelf**, opens one per capture; **Add to Visible Shelf** collects a
+run of captures in one. Copy Text (<kbd>⌘⇧1</kbd>) is unaffected and still copies
+only the text.
+
 The same panel lets you choose:
 
 - **Paste as**: **Automatic** picks a file path for known terminal/IDE apps
@@ -234,13 +275,20 @@ defaults write space.techjuicelab.aishot returnFocus -bool true
 # agent receives the shot without a second keystroke
 defaults write space.techjuicelab.aishot pasteSubmit -bool true
 
+# optional: after the paste, also put the capture file in a Dropover shelf
+defaults write space.techjuicelab.aishot dropoverAlso -bool true
+
+# a Dropover shelf only (no paste, clipboard untouched)
+defaults write space.techjuicelab.aishot targetApp dropover
+
 # restore Automatic destination routing
 defaults delete space.techjuicelab.aishot targetApp
 ```
 
 Destination aliases: `claude` · `codex` · `chatgpt` · `gemini` · `muse` ·
 `antigravity` · `antigravity-ide` · `cursor` · `vscode` · `safari` ·
-`chrome` · `ghostty` · `iterm` · `terminal` · `wezterm` · `kitty` · `warp`.
+`chrome` · `ghostty` · `iterm` · `terminal` · `wezterm` · `kitty` · `warp` ·
+`dropover`.
 Any other app can be selected in the picker or specified by bundle ID
 (`osascript -e 'id of app "SomeApp"'`).
 
@@ -431,6 +479,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | `--self-test` | print folder / frontmost app / permission state and exit | — |
 | `--install` | wire this copy up — install it, register the LaunchAgent, start the host — and exit | what `build.sh` and install scripts call |
 | `--deliver PNG` | save, recognize and paste an existing capture without opening a capture UI | what the menu bar host calls after its own capture |
+| `--warm-ocr` | compile the text recognizer's models (slow only after a macOS update) and exit | what the menu bar host calls at startup |
 
 ## Customize
 

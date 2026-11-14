@@ -95,7 +95,14 @@ let imagePasteIDs = Set([
 enum TargetKind {
     case app
     case terminal
+    /// Not pasted into at all: the capture file is handed over to collect.
+    case shelf
 }
+
+// Dropover holds files in floating shelves. It has no composer to paste into,
+// so as a destination it gets the capture *file*, and it can also take a copy
+// of every capture alongside the usual paste ("Dropover shelf에도 넣기").
+let dropoverBundleID = "me.damir.dropover-mac"
 
 struct TargetPreset {
     let alias: String
@@ -135,7 +142,20 @@ let targetPresets = [
     // an entry using it is invisible in the menu and dead as a destination.
     TargetPreset(alias: "warp", name: "Warp", bundleID: "dev.warp.Warp-Stable",
                  kind: .terminal),
+    TargetPreset(alias: "dropover", name: "Dropover shelf", bundleID: dropoverBundleID,
+                 kind: .shelf),
 ]
+
+/// The heading each group of destinations is listed under, after the apps.
+func targetSectionTitle(_ kind: TargetKind) -> String? {
+    switch kind {
+    case .app: return nil
+    case .terminal: return t("터미널 — Claude Code · Codex CLI · Gemini CLI",
+                             "Terminal — Claude Code · Codex CLI · Gemini CLI")
+    case .shelf: return t("Shelf — 붙여넣지 않고 shelf에만 담기",
+                          "Shelf — collect the file instead of pasting")
+    }
+}
 let targetAliases = Dictionary(uniqueKeysWithValues: targetPresets.map { ($0.alias, $0.bundleID) })
 
 // Destinations where a pasted path is a shell/TUI prompt line, so pressing
@@ -244,6 +264,7 @@ var listWindows = false // --list-windows: print the IDs --window accepts
 var scrollDebugDir: String? // --scroll-debug DIR: dump every raw frame and trace the run
 var targetRaw: String? // --target alias|bundle-id: force the destination for this run
 var assumeFrontRaw: String? // --assume-front bundle-id: the app the menu host saw
+var warmOCR = false // --warm-ocr: compile the text recognizer's models once and exit
 var installOnly = false // --install: wire this copy up and exit, installing nothing else
 var announceInstall = false // --announce: confirm a GUI first run with an alert
 // --deliver PATH: the menu bar host already ran the region capture; save,
@@ -288,6 +309,7 @@ while let arg = argIt.next() {
         guard let value = argIt.next() else { fail("--scroll-debug requires a directory") }
         scrollDebugDir = value
         scrollMode = true
+    case "--warm-ocr":   warmOCR = true
     case "--install":    installOnly = true
     case "--announce":   announceInstall = true
     case "--deliver":
@@ -300,6 +322,19 @@ while let arg = argIt.next() {
 guard ["auto", "path", "image"].contains(mode) else { fail("--mode must be auto|path|image") }
 guard !(ocrMode && scrollMode) else { fail("--ocr cannot be combined with scrolling capture") }
 guard !(deliverPath != nil && scrollMode) else { fail("--deliver cannot be combined with scrolling capture") }
+
+// The menu bar host starts this at login, in its own short-lived process, so
+// the one slow recognition after a macOS update happens here instead of on the
+// user's next Copy Text (see warmTextRecognition). Low priority: nobody is
+// waiting for it.
+if warmOCR {
+    setpriority(PRIO_PROCESS, 0, 10)
+    let started = Date()
+    warmTextRecognition()
+    let seconds = Date().timeIntervalSince(started)
+    if seconds > 2 { log(String(format: "ocr: text recognizer prepared in %.1fs", seconds)) }
+    exit(0)
+}
 
 // MARK: - updater relaunch
 
@@ -490,6 +525,55 @@ let autoLaunchTarget = (CFPreferencesCopyAppValue("autoLaunchTarget" as CFString
 //   defaults write space.techjuicelab.aishot pasteSubmit -bool true
 let pasteSubmit = (CFPreferencesCopyAppValue("pasteSubmit" as CFString,
                                              "space.techjuicelab.aishot" as CFString) as? Bool) ?? false
+// Hand every capture to a Dropover shelf as well, after the paste:
+//   defaults write space.techjuicelab.aishot dropoverAlso -bool true
+// Choosing Dropover as the destination instead puts it in a shelf only.
+let dropoverAlso = (CFPreferencesCopyAppValue("dropoverAlso" as CFString,
+                                              "space.techjuicelab.aishot" as CFString) as? Bool) ?? false
+let deliversToShelfOnly = (flagTargetID ?? storedTargetID) == dropoverBundleID
+
+func isDropoverInstalled() -> Bool {
+    NSWorkspace.shared.urlForApplication(withBundleIdentifier: dropoverBundleID) != nil
+}
+
+/// Hands a capture to Dropover, which shows it in a shelf.
+///
+/// The file is opened with Dropover in the background, the one route that
+/// leaves focus where it is. Dropover's "Add to Dropover" service takes files
+/// too, but it brings Dropover forward, which would pull focus out of the app
+/// that just received the paste. Whether the file opens a new shelf or joins
+/// one already on screen is Dropover's own choice: Settings → Shelf → Adding
+/// Files Behavior (Show in New Shelf by default; Add to Visible Shelf collects
+/// a run of captures in one shelf).
+@discardableResult
+func addToDropoverShelf(_ path: String) -> Bool {
+    guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: dropoverBundleID) else {
+        log("Dropover is not installed — the capture was not added to a shelf")
+        return false
+    }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = false
+    configuration.addsToRecentItems = false
+    var finished = false
+    var failure: Error?
+    NSWorkspace.shared.open([URL(fileURLWithPath: path)], withApplicationAt: appURL,
+                            configuration: configuration) { _, error in
+        DispatchQueue.main.async {
+            failure = error
+            finished = true
+        }
+    }
+    // The worker exits right after this; give a cold Dropover time to launch
+    // and take the file before the request dies with the process.
+    let deadline = Date(timeIntervalSinceNow: 10)
+    while !finished, Date() < deadline { pauseServicingRunLoop(0.02) }
+    if let failure {
+        log("could not hand the capture to Dropover: \(failure.localizedDescription)")
+        return false
+    }
+    if !finished { log("Dropover did not confirm the capture within 10 s") }
+    return finished
+}
 
 func runningApp(_ bundleID: String) -> NSRunningApplication? {
     NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
@@ -514,9 +598,11 @@ func appDisplayName(bundleID: String) -> String {
 }
 
 func destinationDisplayName(bundleID: String) -> String {
+    let preset = targetPresets.first(where: { $0.bundleID == bundleID })
+    // A shelf is named for what it does with the capture, not for the app.
+    if let preset, preset.kind == .shelf { return preset.name }
     let displayName = appDisplayName(bundleID: bundleID)
-    guard let preset = targetPresets.first(where: { $0.bundleID == bundleID }),
-          displayName.caseInsensitiveCompare(preset.name) != .orderedSame else {
+    guard let preset, displayName.caseInsensitiveCompare(preset.name) != .orderedSame else {
         return displayName
     }
     return "\(preset.name) (\(displayName))"
@@ -604,22 +690,20 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
     let autoLaunchTarget = (CFPreferencesCopyAppValue("autoLaunchTarget" as CFString, domain) as? Bool) ?? true
     let returnFocus = (CFPreferencesCopyAppValue("returnFocus" as CFString, domain) as? Bool) ?? false
     let pasteSubmit = (CFPreferencesCopyAppValue("pasteSubmit" as CFString, domain) as? Bool) ?? false
+    let dropoverAlso = (CFPreferencesCopyAppValue("dropoverAlso" as CFString, domain) as? Bool) ?? false
 
-    let destinationPopup = NSPopUpButton(frame: NSRect(x: 112, y: 284, width: 250, height: 26))
+    let destinationPopup = NSPopUpButton(frame: NSRect(x: 112, y: 312, width: 250, height: 26))
     destinationPopup.addItem(withTitle: t("자동 (최전면 앱)", "Automatic (frontmost app)"))
     destinationPopup.lastItem?.representedObject = ""
-    for kind in [TargetKind.app, .terminal] {
-        if kind == .terminal {
+    for kind in [TargetKind.app, .terminal, .shelf] {
+        if let section = targetSectionTitle(kind) {
             destinationPopup.menu?.addItem(.separator())
-            destinationPopup.menu?.addItem(.sectionHeader(title: t("터미널 — Claude Code · Codex CLI · Gemini CLI",
-                                                                   "Terminal — Claude Code · Codex CLI · Gemini CLI")))
+            destinationPopup.menu?.addItem(.sectionHeader(title: section))
         }
         for preset in targetPresets where preset.kind == kind {
             let installed = NSWorkspace.shared.urlForApplication(withBundleIdentifier: preset.bundleID) != nil
-            let displayName = appDisplayName(bundleID: preset.bundleID)
-            let name = !installed ? preset.name + t(" (미설치)", " (not installed)")
-                : (displayName.caseInsensitiveCompare(preset.name) == .orderedSame
-                    ? displayName : "\(preset.name) (\(displayName))")
+            let displayName = destinationDisplayName(bundleID: preset.bundleID)
+            let name = installed ? displayName : preset.name + t(" (미설치)", " (not installed)")
             addTargetItem(to: destinationPopup, name: name,
                           bundleID: preset.bundleID, select: storedTargetID == preset.bundleID)
         }
@@ -632,7 +716,7 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
     }
     if storedTargetID == nil { destinationPopup.selectItem(at: 0) }
 
-    let formatPopup = NSPopUpButton(frame: NSRect(x: 112, y: 245, width: 250, height: 26))
+    let formatPopup = NSPopUpButton(frame: NSRect(x: 112, y: 273, width: 250, height: 26))
     for (title, value) in [(t("자동", "Automatic"), "auto"),
                            (t("PNG 이미지", "PNG image"), "image"),
                            (t("파일 경로", "File path"), "path")] {
@@ -643,7 +727,7 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
 
     // How a scrolling capture's recognized text is delivered. The image alone is
     // not enough there — see the scrollOcrMode notes at the capture site.
-    let ocrPopup = NSPopUpButton(frame: NSRect(x: 112, y: 206, width: 250, height: 26))
+    let ocrPopup = NSPopUpButton(frame: NSRect(x: 112, y: 234, width: 250, height: 26))
     let currentOcrMode = storedScrollOcrMode()
     for (title, value) in [(t("안 함 — 이미지만 (빠름)", "Off — image only (fastest)"), "off"),
                            (t("텍스트 파일로 저장 (.txt)", "Save text file (.txt)"), "sidecar"),
@@ -658,7 +742,7 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
     let pinnedLanguage = (CFPreferencesCopyAppValue("language" as CFString,
                                                     "space.techjuicelab.aishot" as CFString) as? String)?
         .lowercased()
-    let languagePopup = NSPopUpButton(frame: NSRect(x: 112, y: 167, width: 250, height: 26))
+    let languagePopup = NSPopUpButton(frame: NSRect(x: 112, y: 195, width: 250, height: 26))
     for (title, value) in [(t("시스템 언어 따름", "Follow system language"), "auto"),
                            ("한국어", "ko"), ("English", "en")] {
         languagePopup.addItem(withTitle: title)
@@ -668,7 +752,7 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
         }
     }
 
-    let folderPopup = NSPopUpButton(frame: NSRect(x: 112, y: 128, width: 250, height: 26))
+    let folderPopup = NSPopUpButton(frame: NSRect(x: 112, y: 156, width: 250, height: 26))
     let systemFolder = (systemScreenshotFolder() as NSString).abbreviatingWithTildeInPath
     folderPopup.addItem(withTitle: t("시스템 폴더 — \(systemFolder)", "System folder — \(systemFolder)"))
     folderPopup.lastItem?.representedObject = ""
@@ -682,13 +766,13 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
 
     let controller = SettingsController(popup: destinationPopup, folderPopup: folderPopup)
 
-    let chooseButton = NSButton(frame: NSRect(x: 372, y: 283, width: 148, height: 28))
+    let chooseButton = NSButton(frame: NSRect(x: 372, y: 311, width: 148, height: 28))
     chooseButton.title = t("다른 앱 선택…", "Choose Other…")
     chooseButton.bezelStyle = .rounded
     chooseButton.target = controller
     chooseButton.action = #selector(SettingsController.chooseOtherApplication(_:))
 
-    let folderButton = NSButton(frame: NSRect(x: 372, y: 127, width: 148, height: 28))
+    let folderButton = NSButton(frame: NSRect(x: 372, y: 155, width: 148, height: 28))
     folderButton.title = t("폴더 선택…", "Choose Folder…")
     folderButton.bezelStyle = .rounded
     folderButton.target = controller
@@ -698,22 +782,34 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
         checkboxWithTitle: t("목적지 앱이 꺼져 있으면 실행하기",
                              "Open the destination app when it is not running"),
         target: nil, action: nil)
-    launchCheckbox.frame = NSRect(x: 112, y: 96, width: 408, height: 24)
+    launchCheckbox.frame = NSRect(x: 112, y: 124, width: 408, height: 24)
     launchCheckbox.state = autoLaunchTarget ? .on : .off
 
     let returnCheckbox = NSButton(
         checkboxWithTitle: t("붙여넣은 뒤 이전 앱으로 돌아가기",
                              "Return to the previous app after pasting"),
         target: nil, action: nil)
-    returnCheckbox.frame = NSRect(x: 112, y: 68, width: 408, height: 24)
+    returnCheckbox.frame = NSRect(x: 112, y: 96, width: 408, height: 24)
     returnCheckbox.state = returnFocus ? .on : .off
 
     let submitCheckbox = NSButton(
         checkboxWithTitle: t("터미널에 경로를 붙여넣은 뒤 Enter로 바로 보내기",
                              "Press Return after pasting a path into a terminal"),
         target: nil, action: nil)
-    submitCheckbox.frame = NSRect(x: 112, y: 40, width: 408, height: 24)
+    submitCheckbox.frame = NSRect(x: 112, y: 68, width: 408, height: 24)
     submitCheckbox.state = pasteSubmit ? .on : .off
+
+    let dropoverInstalled = isDropoverInstalled()
+    let dropoverCheckbox = NSButton(
+        checkboxWithTitle: t("Dropover shelf에도 넣기", "Also add each capture to a Dropover shelf")
+            + (dropoverInstalled ? "" : t(" (Dropover 미설치)", " (Dropover not installed)")),
+        target: nil, action: nil)
+    dropoverCheckbox.frame = NSRect(x: 112, y: 40, width: 408, height: 24)
+    dropoverCheckbox.state = dropoverAlso ? .on : .off
+    dropoverCheckbox.isEnabled = dropoverInstalled || dropoverAlso // never trap a stale "on"
+    dropoverCheckbox.toolTip = t(
+        "붙여넣기는 그대로 하고, 캡처 파일을 Dropover shelf에도 담습니다. shelf에만 담으려면 목적지에서 Dropover shelf를 고르세요. 새 shelf로 열지 열려 있는 shelf에 더할지는 Dropover 설정 → Shelf → Adding Files Behavior를 따릅니다.",
+        "Pastes as usual and also puts the capture file in a Dropover shelf. To use only the shelf, choose Dropover shelf as the destination. Whether a new shelf opens or a visible one collects it follows Dropover Settings → Shelf → Adding Files Behavior.")
 
     func label(_ text: String, y: CGFloat) -> NSTextField {
         let field = NSTextField(labelWithString: text)
@@ -721,11 +817,11 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
         field.alignment = .right
         return field
     }
-    let destinationLabel = label(t("목적지", "Destination"), y: 287)
-    let formatLabel = label(t("붙여넣기 형식", "Paste as"), y: 248)
-    let ocrLabel = label(t("스크롤 OCR", "Scroll OCR"), y: 209)
-    let languageLabel = label(t("언어", "Language"), y: 170)
-    let folderLabel = label(t("저장 폴더", "Save folder"), y: 131)
+    let destinationLabel = label(t("목적지", "Destination"), y: 315)
+    let formatLabel = label(t("붙여넣기 형식", "Paste as"), y: 276)
+    let ocrLabel = label(t("스크롤 OCR", "Scroll OCR"), y: 237)
+    let languageLabel = label(t("언어", "Language"), y: 198)
+    let folderLabel = label(t("저장 폴더", "Save folder"), y: 159)
 
     let note = NSTextField(wrappingLabelWithString: t(
         "이미지·경로는 클립보드에 남습니다. 바꾼 언어는 이 창을 다시 열면 반영됩니다.",
@@ -736,16 +832,17 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
 
     let shortcutEditor = HotkeySettingsView(configuration: NativeHotkeyPreferences.load())
     let shortcutHeight = HotkeySettingsView.preferredHeight
-    shortcutEditor.frame = NSRect(x: 0, y: 313 - shortcutHeight, width: 520, height: shortcutHeight)
+    let paneHeight: CGFloat = 341
+    shortcutEditor.frame = NSRect(x: 0, y: paneHeight - shortcutHeight, width: 520, height: shortcutHeight)
     shortcutEditor.autoresizingMask = [.width, .minYMargin]
     if let issue = HotkeyAction.allCases.compactMap({ hotkeys?.registrationIssues[$0] }).first {
         shortcutEditor.showValidationError(issue.message)
     }
     defer { shortcutEditor.finishRecording() }
-    let generalPane = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 313))
+    let generalPane = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: paneHeight))
     [destinationLabel, destinationPopup, chooseButton, formatLabel, formatPopup,
      ocrLabel, ocrPopup, languageLabel, languagePopup, folderLabel, folderPopup,
-     folderButton, launchCheckbox, returnCheckbox, submitCheckbox,
+     folderButton, launchCheckbox, returnCheckbox, submitCheckbox, dropoverCheckbox,
      note].forEach {
         generalPane.addSubview($0)
     }
@@ -753,7 +850,7 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
     shortcutPane.addSubview(shortcutEditor)
     // Keep the panel usable on smaller laptop displays instead of adding all
     // shortcut controls below an already full settings form.
-    let tabs = NSTabView(frame: NSRect(x: 0, y: 0, width: 552, height: 355))
+    let tabs = NSTabView(frame: NSRect(x: 0, y: 0, width: 552, height: paneHeight + 42))
     let generalTab = NSTabViewItem(identifier: "general")
     generalTab.label = t("일반", "General")
     generalTab.view = generalPane
@@ -819,6 +916,8 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
                              returnCheckbox.state == .on ? kCFBooleanTrue : kCFBooleanFalse, domain)
     CFPreferencesSetAppValue("pasteSubmit" as CFString,
                              submitCheckbox.state == .on ? kCFBooleanTrue : kCFBooleanFalse, domain)
+    CFPreferencesSetAppValue("dropoverAlso" as CFString,
+                             dropoverCheckbox.state == .on ? kCFBooleanTrue : kCFBooleanFalse, domain)
     CFPreferencesAppSynchronize(domain)
     log(selectedID.isEmpty
         ? "destination set to Automatic"
@@ -870,6 +969,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let destinationItem = NSMenuItem(title: "Destination", action: nil,
                                               keyEquivalent: "")
+    private let dropoverAlsoItem = NSMenuItem(title: "Dropover", action: nil, keyEquivalent: "")
     private let hostLockFD: Int32
     private let preferencesDomain = "space.techjuicelab.aishot" as CFString
     private var hotkeys: NativeHotkeyManager!
@@ -957,6 +1057,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // per-bundle, and only this long-lived process is registered as a
         // notification client. Once granted, the workers can post banners.
         requestNotificationAuthorization()
+        // The first Copy Text after a macOS update used to sit for 20 s while
+        // Vision compiled its models, long enough to paste the old clipboard
+        // and conclude that it does not work. Compile them now, in a process of
+        // their own (see warmTextRecognition); a few seconds' delay keeps it
+        // out of the way of everything else that starts at login.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            self?.launchSibling(arguments: ["--warm-ocr"], activates: false)
+        }
     }
 
     deinit {
@@ -991,6 +1099,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             destinationItem.submenu = NSMenu(title: "Destination")
         }
         menu.addItem(destinationItem)
+        dropoverAlsoItem.title = t("Dropover shelf에도 넣기", "Also Add to Dropover Shelf")
+        dropoverAlsoItem.action = #selector(toggleDropoverAlso(_:))
+        dropoverAlsoItem.target = self
+        menu.addItem(dropoverAlsoItem)
         menu.addItem(.separator())
 
         let settingsItem = NSMenuItem(title: t("설정…", "Settings…"),
@@ -1072,8 +1184,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // Apps first, then terminals under their own heading. A terminal is
         // listed as a destination in its own right because what the user is
         // aiming at is the CLI agent inside it, and that agent has no bundle ID
-        // of its own to pick.
-        for kind in [TargetKind.app, .terminal] {
+        // of its own to pick. Shelves come last: they collect the file instead
+        // of receiving a paste.
+        for kind in [TargetKind.app, .terminal, .shelf] {
             let visible = targetPresets.filter { preset in
                 guard preset.kind == kind else { return false }
                 let installed = NSWorkspace.shared.urlForApplication(
@@ -1081,10 +1194,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 return installed || currentID == preset.bundleID
             }
             guard !visible.isEmpty else { continue }
-            if kind == .terminal {
+            if let section = targetSectionTitle(kind) {
                 submenu.addItem(.separator())
-                submenu.addItem(.sectionHeader(title: t("터미널 — Claude Code · Codex CLI · Gemini CLI",
-                                                        "Terminal — Claude Code · Codex CLI · Gemini CLI")))
+                submenu.addItem(.sectionHeader(title: section))
             }
             for preset in visible {
                 addDestinationItem(title: destinationDisplayName(bundleID: preset.bundleID),
@@ -1109,6 +1221,25 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         moreItem.target = self
         submenu.addItem(moreItem)
         destinationItem.submenu = submenu
+
+        // Offered only with Dropover installed, and moot while the shelf is
+        // already the destination.
+        let dropoverAlso = (CFPreferencesCopyAppValue("dropoverAlso" as CFString,
+                                                      preferencesDomain) as? Bool) ?? false
+        dropoverAlsoItem.isHidden = !isDropoverInstalled() && !dropoverAlso
+        dropoverAlsoItem.state = dropoverAlso ? .on : .off
+        dropoverAlsoItem.isEnabled = currentID != dropoverBundleID
+    }
+
+    @objc private func toggleDropoverAlso(_ sender: NSMenuItem) {
+        CFPreferencesAppSynchronize(preferencesDomain)
+        let enabled = !((CFPreferencesCopyAppValue("dropoverAlso" as CFString,
+                                                   preferencesDomain) as? Bool) ?? false)
+        CFPreferencesSetAppValue("dropoverAlso" as CFString,
+                                 enabled ? kCFBooleanTrue : kCFBooleanFalse, preferencesDomain)
+        CFPreferencesAppSynchronize(preferencesDomain)
+        log("Dropover shelf copy \(enabled ? "on" : "off") from menu bar")
+        refreshDestinationMenu()
     }
 
     private func addDestinationItem(title: String, bundleID: String?, selected: Bool,
@@ -1844,6 +1975,12 @@ if selfTest {
     log("language:       \(uiLanguage.rawValue)")
     log("screen-record:  \(CGPreflightScreenCaptureAccess() ? "granted" : "NOT granted")")
     log("accessibility:  \(AXIsProcessTrusted() ? "granted" : "NOT granted")")
+    let dropoverState = isDropoverInstalled() ? "" : " — Dropover is NOT installed"
+    if deliversToShelfOnly {
+        log("would add to:   a Dropover shelf only (no paste, clipboard untouched)\(dropoverState)")
+        exit(0)
+    }
+    if dropoverAlso { log("also adds to:   a Dropover shelf, after the paste\(dropoverState)") }
     if r.autoPaste, let id = r.bundleID {
         let submits = pasteSubmit && r.mode == "path" && terminalIDs.contains(id)
         log("would paste as: \(r.mode) into \(destinationDisplayName(bundleID: id))"
@@ -2186,6 +2323,32 @@ if scrollMode {
     }
 }
 
+/// Recognizes text off the main thread while the main thread keeps the run
+/// loop going, and puts up a "still reading" HUD if it takes long enough to be
+/// noticed. Recognition is normally half a second; the first one after a macOS
+/// update can take 20, and a silent wait that long is indistinguishable from a
+/// Copy Text that did nothing — the user pastes the old clipboard and gives up.
+func recognizeTextShowingProgress(in image: CGImage) throws -> String {
+    var outcome: Result<String, Error>?
+    let started = Date()
+    DispatchQueue.global(qos: .userInitiated).async {
+        let result = Result { try recognizeText(in: image, usesLanguageCorrection: false) }
+        DispatchQueue.main.async { outcome = result }
+    }
+    var progress: NSWindow?
+    while outcome == nil {
+        if progress == nil, Date().timeIntervalSince(started) > 0.8 {
+            progress = presentHUD(t("텍스트 인식 중… 잠시만 기다려 주세요",
+                                    "Reading text… one moment"))
+        }
+        pauseServicingRunLoop(0.03)
+    }
+    progress?.orderOut(nil)
+    let seconds = Date().timeIntervalSince(started)
+    if seconds > 2 { log(String(format: "ocr: recognition took %.1fs", seconds)) }
+    return try outcome!.get()
+}
+
 // OCR copy has its own delivery path: a pinned terminal, pasteSubmit or an image
 // preference must never turn recognized text into a path or a keystroke.
 if ocrMode {
@@ -2194,7 +2357,7 @@ if ocrMode {
             forProposedRect: nil, context: nil, hints: nil) else {
             throw TextRecognitionError.invalidImage
         }
-        let text = try recognizeText(in: image, usesLanguageCorrection: false)
+        let text = try recognizeTextShowingProgress(in: image)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             log("ocr: no text recognized — clipboard unchanged; saved \(savePath)")
             showHUD(t("인식된 텍스트가 없습니다. 클립보드를 유지했습니다.",
@@ -2307,11 +2470,36 @@ func pasteFollowUpText(_ text: String, into dest: NSRunningApplication) {
 
 // MARK: - paste
 
+/// Every delivery ends here, whichever way it went: with "Dropover shelf에도
+/// 넣기" on, the capture goes to a shelf as well. Last, so that Dropover — even
+/// a Dropover that has to launch — can never come between the destination and
+/// its ⌘V, and so a shot that only reached the clipboard still reaches the shelf.
+func finishDelivery() -> Never {
+    if dropoverAlso, !deliversToShelfOnly, addToDropoverShelf(savePath) {
+        log("also added the capture to a Dropover shelf")
+    }
+    log("saved \(savePath)")
+    exit(0)
+}
+
+// Dropover as the destination: the shot is collected in a shelf, not pasted,
+// and the clipboard keeps whatever the user had on it — gathering a few shots
+// to drag somewhere later should not cost them what they copied last.
+if deliversToShelfOnly {
+    if addToDropoverShelf(savePath) {
+        log("added the capture to a Dropover shelf — clipboard left as it was")
+    } else {
+        copyCaptureToPasteboard()
+        log("could not reach Dropover — copied \(deliveredKind) to clipboard instead")
+    }
+    log("saved \(savePath)")
+    exit(0)
+}
+
 guard route.autoPaste else {
     copyCaptureToPasteboard()
     log("copied \(deliveredKind) to clipboard — paste with ⌘V")
-    log("saved \(savePath)")
-    exit(0)
+    finishDelivery()
 }
 
 guard AXIsProcessTrusted() else {
@@ -2320,8 +2508,7 @@ guard AXIsProcessTrusted() else {
     let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
     _ = AXIsProcessTrustedWithOptions(opts)
     log("accessibility not granted — copied to clipboard, paste with ⌘V (auto-paste once granted)")
-    log("saved \(savePath)")
-    exit(0)
+    finishDelivery()
 }
 
 var destination = route.app
@@ -2332,15 +2519,13 @@ if destination == nil, let bundleID = route.bundleID, let launchURL = route.laun
 guard let dest = destination else {
     copyCaptureToPasteboard()
     log("destination is unavailable — copied \(deliveredKind) to clipboard")
-    log("saved \(savePath)")
-    exit(0)
+    finishDelivery()
 }
 
 guard waitUntilFinishedLaunching(dest) else {
     copyCaptureToPasteboard()
     log("destination did not finish launching — skipped ⌘V; capture remains on clipboard")
-    log("saved \(savePath)")
-    exit(0)
+    finishDelivery()
 }
 
 // Bring the destination forward, then focus its composer when an app-specific
@@ -2379,8 +2564,7 @@ if pb.changeCount != captureChangeCount {
 }
 guard pb.changeCount == captureChangeCount else {
     log("clipboard kept changing — skipped ⌘V; the capture is saved and copied")
-    log("saved \(savePath)")
-    exit(0)
+    finishDelivery()
 }
 
 let expectedBundleID = route.bundleID ?? dest.bundleIdentifier
@@ -2392,15 +2576,13 @@ let destinationIdentityMatches = expectedBundleID.map { bundleID in
 
 guard !dest.isTerminated, destinationIdentityMatches else {
     log("destination or keyboard event source became unavailable — skipped ⌘V")
-    log("saved \(savePath)")
-    exit(0)
+    finishDelivery()
 }
 let destinationIsFrontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
     == dest.processIdentifier
 guard postPasteShortcut(to: dest) else {
     log("destination or keyboard event source became unavailable — skipped ⌘V")
-    log("saved \(savePath)")
-    exit(0)
+    finishDelivery()
 }
 let targetName = dest.localizedName ?? dest.bundleIdentifier ?? "?"
 // "Sent", not "pasted": whether the app accepted ⌘V is not observable from
@@ -2436,4 +2618,4 @@ if returnFocus, let front, front.processIdentifier != dest.processIdentifier {
     front.activate(options: [.activateAllWindows])
     usleep(150_000)
 }
-log("saved \(savePath)")
+finishDelivery()
