@@ -244,6 +244,7 @@ var listWindows = false // --list-windows: print the IDs --window accepts
 var scrollDebugDir: String? // --scroll-debug DIR: dump every raw frame and trace the run
 var targetRaw: String? // --target alias|bundle-id: force the destination for this run
 var assumeFrontRaw: String? // --assume-front bundle-id: the app the menu host saw
+var warmOCR = false // --warm-ocr: compile the text recognizer's models once and exit
 var installOnly = false // --install: wire this copy up and exit, installing nothing else
 var announceInstall = false // --announce: confirm a GUI first run with an alert
 // --deliver PATH: the menu bar host already ran the region capture; save,
@@ -288,6 +289,7 @@ while let arg = argIt.next() {
         guard let value = argIt.next() else { fail("--scroll-debug requires a directory") }
         scrollDebugDir = value
         scrollMode = true
+    case "--warm-ocr":   warmOCR = true
     case "--install":    installOnly = true
     case "--announce":   announceInstall = true
     case "--deliver":
@@ -300,6 +302,19 @@ while let arg = argIt.next() {
 guard ["auto", "path", "image"].contains(mode) else { fail("--mode must be auto|path|image") }
 guard !(ocrMode && scrollMode) else { fail("--ocr cannot be combined with scrolling capture") }
 guard !(deliverPath != nil && scrollMode) else { fail("--deliver cannot be combined with scrolling capture") }
+
+// The menu bar host starts this at login, in its own short-lived process, so
+// the one slow recognition after a macOS update happens here instead of on the
+// user's next Copy Text (see warmTextRecognition). Low priority: nobody is
+// waiting for it.
+if warmOCR {
+    setpriority(PRIO_PROCESS, 0, 10)
+    let started = Date()
+    warmTextRecognition()
+    let seconds = Date().timeIntervalSince(started)
+    if seconds > 2 { log(String(format: "ocr: text recognizer prepared in %.1fs", seconds)) }
+    exit(0)
+}
 
 // MARK: - updater relaunch
 
@@ -957,6 +972,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // per-bundle, and only this long-lived process is registered as a
         // notification client. Once granted, the workers can post banners.
         requestNotificationAuthorization()
+        // The first Copy Text after a macOS update used to sit for 20 s while
+        // Vision compiled its models, long enough to paste the old clipboard
+        // and conclude that it does not work. Compile them now, in a process of
+        // their own (see warmTextRecognition); a few seconds' delay keeps it
+        // out of the way of everything else that starts at login.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            self?.launchSibling(arguments: ["--warm-ocr"], activates: false)
+        }
     }
 
     deinit {
@@ -2186,6 +2209,32 @@ if scrollMode {
     }
 }
 
+/// Recognizes text off the main thread while the main thread keeps the run
+/// loop going, and puts up a "still reading" HUD if it takes long enough to be
+/// noticed. Recognition is normally half a second; the first one after a macOS
+/// update can take 20, and a silent wait that long is indistinguishable from a
+/// Copy Text that did nothing — the user pastes the old clipboard and gives up.
+func recognizeTextShowingProgress(in image: CGImage) throws -> String {
+    var outcome: Result<String, Error>?
+    let started = Date()
+    DispatchQueue.global(qos: .userInitiated).async {
+        let result = Result { try recognizeText(in: image, usesLanguageCorrection: false) }
+        DispatchQueue.main.async { outcome = result }
+    }
+    var progress: NSWindow?
+    while outcome == nil {
+        if progress == nil, Date().timeIntervalSince(started) > 0.8 {
+            progress = presentHUD(t("텍스트 인식 중… 잠시만 기다려 주세요",
+                                    "Reading text… one moment"))
+        }
+        pauseServicingRunLoop(0.03)
+    }
+    progress?.orderOut(nil)
+    let seconds = Date().timeIntervalSince(started)
+    if seconds > 2 { log(String(format: "ocr: recognition took %.1fs", seconds)) }
+    return try outcome!.get()
+}
+
 // OCR copy has its own delivery path: a pinned terminal, pasteSubmit or an image
 // preference must never turn recognized text into a path or a keystroke.
 if ocrMode {
@@ -2194,7 +2243,7 @@ if ocrMode {
             forProposedRect: nil, context: nil, hints: nil) else {
             throw TextRecognitionError.invalidImage
         }
-        let text = try recognizeText(in: image, usesLanguageCorrection: false)
+        let text = try recognizeTextShowingProgress(in: image)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             log("ocr: no text recognized — clipboard unchanged; saved \(savePath)")
             showHUD(t("인식된 텍스트가 없습니다. 클립보드를 유지했습니다.",

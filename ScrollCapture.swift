@@ -1328,7 +1328,7 @@ func recognizeText(in image: CGImage, usesLanguageCorrection: Bool = true,
 
     let stride = tileHeight - overlap
     let tileCount = max(1, (height - overlap + stride - 1) / stride)
-    var lines: [String] = []
+    var lines: [RecognizedLine] = []
 
     for tileIndex in 0 ..< tileCount {
         let tileTop = tileIndex * stride
@@ -1355,48 +1355,47 @@ func recognizeText(in image: CGImage, usesLanguageCorrection: Bool = true,
             - (tileTop + thisHeight >= height ? 0.0 : Double(overlap) / 2)
 
         // Vision's boxes are normalized, origin bottom-left; captures are
-        // reasoned about top-down.
-        var accepted: [(y: Double, x: Double, height: Double, text: String)] = []
+        // reasoned about top-down, in the whole capture's pixels, so lines from
+        // every tile can be laid out together.
         for observation in observations {
             guard let candidate = observation.topCandidates(1).first else { continue }
             let box = observation.boundingBox
             let centerY = (1.0 - Double(box.midY)) * Double(thisHeight)
             guard centerY >= acceptFrom, centerY < acceptTo else { continue }
-            accepted.append((centerY, Double(box.minX), Double(box.height) * Double(thisHeight),
-                             candidate.string))
-        }
-        // First use a strict order. A pairwise "close enough in y" comparator
-        // is not transitive and can swap densely spaced, indented lines.
-        accepted.sort {
-            if $0.y != $1.y { return $0.y < $1.y }
-            if $0.x != $1.x { return $0.x < $1.x }
-            return $0.text < $1.text
-        }
-        // Group around a fixed row anchor, then sort that row left to right.
-        // Scale the tolerance to the glyphs, so small text on adjacent lines
-        // does not get mistaken for fragments of a single row.
-        var rowStart = 0
-        while rowStart < accepted.count {
-            let anchor = accepted[rowStart]
-            var rowEnd = rowStart + 1
-            while rowEnd < accepted.count {
-                let next = accepted[rowEnd]
-                let tolerance = min(anchor.height, next.height) * 0.45
-                guard next.y - anchor.y <= tolerance else { break }
-                rowEnd += 1
-            }
-            let row = accepted[rowStart ..< rowEnd].sorted {
-                if $0.x != $1.x { return $0.x < $1.x }
-                if $0.y != $1.y { return $0.y < $1.y }
-                return $0.text < $1.text
-            }
-            lines.append(contentsOf: row.map(\.text))
-            rowStart = rowEnd
+            let rect = CGRect(x: Double(box.minX) * Double(width),
+                              y: Double(tileTop) + (1.0 - Double(box.maxY)) * Double(thisHeight),
+                              width: Double(box.width) * Double(width),
+                              height: Double(box.height) * Double(thisHeight))
+            lines.append(RecognizedLine(rect: rect, text: candidate.string,
+                                        confidence: observation.confidence))
         }
         progress(tileIndex + 1, tileCount)
     }
 
-    return lines.joined(separator: "\n")
+    return readingOrderText(lines)
+}
+
+/// Runs the recognizer once on a blank image and throws the result away.
+///
+/// The first recognition after a macOS update compiles Vision's text models
+/// for this app — 20 s measured on macOS 27.2.1, against 0.5 s once they are
+/// cached. The cache lives under ~/Library/Caches/<bundle ID> in a folder named
+/// after the OS build, so it is shared by every AIShot process, survives app
+/// updates and is rebuilt only when macOS changes. A blank image is enough: it
+/// builds both the detection and the recognition models, after which a fresh
+/// process read a full two-column page in 0.86 s. The menu bar host runs this in
+/// a throwaway process at startup, so that cost lands on the login after an
+/// update instead of on the first Copy Text, and the 100+ MB a recognizer keeps
+/// resident is freed with the process instead of staying in the host.
+func warmTextRecognition() {
+    guard let context = CGContext(data: nil, width: 64, height: 32, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return }
+    context.setFillColor(CGColor(gray: 1, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: 64, height: 32))
+    guard let blank = context.makeImage() else { return }
+    _ = try? recognizeText(in: blank, usesLanguageCorrection: false)
 }
 
 // MARK: - feedback
@@ -1481,6 +1480,28 @@ func postNotificationIfAllowed(title: String, body: String) {
 /// minute the user needs to be told *something* happened. Borrowing a corner of
 /// the screen needs no permission, no daemon and no registration.
 func showHUD(_ message: String, seconds: TimeInterval = 2.2) {
+    guard let panel = presentHUD(message) else { return }
+
+    let visibleUntil = Date(timeIntervalSinceNow: seconds)
+    while Date() < visibleUntil {
+        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.03))
+    }
+
+    NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.35
+        panel.animator().alphaValue = 0
+    }
+    let fadeUntil = Date(timeIntervalSinceNow: 0.4)
+    while Date() < fadeUntil {
+        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.03))
+    }
+    panel.orderOut(nil)
+}
+
+/// Puts the HUD on screen and returns it, for a message that stays up until
+/// the caller removes it with `orderOut` — "still working" while something
+/// slow runs, rather than a confirmation with a fixed lifetime.
+func presentHUD(_ message: String) -> NSWindow? {
     // The screen under the pointer, which is where the user is looking.
     // `NSScreen.main` is the screen holding the *key window*, and a capture
     // worker has none — on a multi-display Mac it answers with whichever screen
@@ -1488,7 +1509,7 @@ func showHUD(_ message: String, seconds: TimeInterval = 2.2) {
     let pointer = NSEvent.mouseLocation
     guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) })
         ?? NSScreen.screens.first
-    else { return }
+    else { return nil }
 
     let text = NSTextField(labelWithString: message)
     text.font = .systemFont(ofSize: 15, weight: .medium)
@@ -1526,21 +1547,7 @@ func showHUD(_ message: String, seconds: TimeInterval = 2.2) {
     background.addSubview(text)
     panel.contentView = background
     panel.orderFrontRegardless()
-
-    let visibleUntil = Date(timeIntervalSinceNow: seconds)
-    while Date() < visibleUntil {
-        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.03))
-    }
-
-    NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.35
-        panel.animator().alphaValue = 0
-    }
-    let fadeUntil = Date(timeIntervalSinceNow: 0.4)
-    while Date() < fadeUntil {
-        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.03))
-    }
-    panel.orderOut(nil)
+    return panel
 }
 
 // MARK: - output
