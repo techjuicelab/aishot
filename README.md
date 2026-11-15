@@ -83,11 +83,14 @@ keeps its cells), and a blank line marks a paragraph gap or the start of the
 next column. A second, low-confidence reading Vision sometimes reports on top
 of a line touching the edge of the capture is dropped.
 
-Recognition normally takes under a second, but **the first one after a macOS
-update takes around 20 s** while Vision recompiles its models (their cache is
-kept per macOS build). AIShot does that compile at login, and if recognition
-still runs long, **Reading text…** appears near the top of the screen; paste
-once it gives way to `✓ Text copied`.
+Recognition normally takes a quarter to half a second: the process that does it is
+started with the shortcut and loads the recognizer while you are still
+selecting, so the capture is read the moment it exists. **The first recognition
+after a macOS update takes around 20 s** while Vision recompiles its models
+(their cache is kept per macOS build). AIShot does that compile at login, and if
+recognition still runs long, **Reading text…** appears near the top of the
+screen; paste once it gives way to `✓ Text copied`. The next capture can start
+as soon as the text is copied, while that confirmation is still on screen.
 
 ## Scrolling capture — a whole window in one image
 
@@ -106,6 +109,11 @@ scroll position, the seam is found by matching pixels, which leaves two limits:
 - Playing video or an infinite-scroll feed can stop the capture early when no
   seam can be justified. Everything up to that point is still exact.
 
+What sits over the bottom edge of the window — its rounded corners, and a bar
+that floats there — is taken from the last frame only. At every seam above it
+the next frame's view of the same rows is used, so neither shows up down the
+page.
+
 ### Knowing it finished
 
 The capture opens with the same shutter macOS plays for its own screenshots, and
@@ -114,6 +122,9 @@ closes with a short chime and a panel near the top of the screen —
 of seconds. A scrolling capture can run for tens of seconds with nothing on
 screen, and without a signal there is no way to tell a finished one from a stuck
 one. Failures get a different sound and a window explaining why.
+
+The capture is copied and pasted while that panel is still up, well under a
+second after the last frame, rather than once it has faded.
 
 A Notification Center banner is posted too when permission exists. macOS often
 withholds it from a locally-signed build of AIShot, so the on-screen panel is the
@@ -144,6 +155,13 @@ no network and no API key.
 | `doublePaste` | paste the image, swap the clipboard to the text, paste again |
 | `textOnly` | paste the text only |
 | `auto` | both while the image stays legible, text alone past 8000 px tall |
+
+Vision answers for a piece of a page it cannot handle with part of the text or
+none, and no error. AIShot therefore reads a page in pieces of at most
+3840×2400 px — a window wider than that, such as one filling a 5K display, is
+read through overlapping pieces across its width — and reads again any stretch
+that shows something and came back without text. Expect a long page to take a
+few seconds per 10,000 px of height.
 
 With recognition on, the text is always written to the `.txt` as well — the
 clipboard is transient, the file is not. **The PNG is saved at full resolution
@@ -483,6 +501,8 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | `--install` | wire this copy up — install it, register the LaunchAgent, start the host — and exit | what `build.sh` and install scripts call |
 | `--deliver PNG` | save, recognize and paste an existing capture without opening a capture UI | what the menu bar host calls after its own capture |
 | `--warm-ocr` | compile the text recognizer's models (slow only after a macOS update) and exit | what the menu bar host calls at startup |
+| `--captured-at UPTIME` | with `--deliver`: when the capture finished, as system uptime in seconds, so the wait before pasting is counted from then | passed by the menu bar host |
+| `--ocr-standby` | load the text recognizer, then read `UPTIME<tab>PNG` from standard input and copy that capture's text; exit if the input closes first | what the menu bar host starts with the Copy Text shortcut |
 
 ## Customize
 
@@ -514,7 +534,8 @@ defaults delete space.techjuicelab.aishot 2>/dev/null
 # if configured, also remove its shortcut from your launcher / Karabiner
 ```
 
-Log: `/tmp/aishot.log`
+Log: `/tmp/aishot.log`. A delivered capture's line ends with how long it took,
+e.g. `sent path paste (⌘V) to Ghostty (0.52s after the capture)`.
 
 ## License
 

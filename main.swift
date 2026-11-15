@@ -270,6 +270,17 @@ var announceInstall = false // --announce: confirm a GUI first run with an alert
 // --deliver PATH: the menu bar host already ran the region capture; save,
 // recognize and paste this file without opening a capture UI of its own.
 var deliverPath: String?
+// --captured-at UPTIME: when the host's screencapture exited, as system uptime
+// in seconds. The wait for the focus hand-off counts from that moment, so the
+// time this worker took to launch is not waited out a second time.
+var capturedAtUptime: TimeInterval?
+// --ocr-standby: the host starts this worker with the Copy Text shortcut, while
+// the user is still selecting. It loads the text recognizer and then reads the
+// capture to recognize from standard input (see "Copy Text standby").
+var ocrStandby = false
+/// Entered while a standby worker loads the recognizer; recognition waits on it
+/// so the models are never loaded twice at once.
+let textRecognizerWarmUp = DispatchGroup()
 
 var argIt = CommandLine.arguments.dropFirst().makeIterator()
 while let arg = argIt.next() {
@@ -315,6 +326,14 @@ while let arg = argIt.next() {
     case "--deliver":
         guard let value = argIt.next() else { fail("--deliver requires a PNG path") }
         deliverPath = (value as NSString).expandingTildeInPath
+    case "--captured-at":
+        guard let value = argIt.next(), let uptime = Double(value) else {
+            fail("--captured-at requires a system uptime in seconds")
+        }
+        capturedAtUptime = uptime
+    case "--ocr-standby":
+        ocrStandby = true
+        ocrMode = true
     case "--capture":    break // explicit alias for the default one-shot capture mode
     default:             fail("unknown flag: \(arg)")
     }
@@ -403,7 +422,9 @@ if installOnly {
 // Diagnostic and utility runs are deliberately left out: --self-test or
 // --list-windows against a build tree should report on that build tree, not
 // quietly relocate the app to /Applications.
+// A standby worker is only ever started by the installed host.
 let mayAutoInstall = !showMenuBar && !selfTest && !listWindows && !chooseDir && !showSettings
+    && !ocrStandby
 if mayAutoInstall, Install.needsInstall() {
     if Install.needsRelocation() {
         // The copy that finishes the job is the one at the install location, and
@@ -1058,6 +1079,18 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var deliveryStartedAt: Date?
     private var deliveryPID: pid_t?
 
+    // Copy Text spends its time before the capture exists: a worker has to
+    // launch (about 0.12 s through LaunchServices) and load the text
+    // recognizer (about 0.1 s) before it can read anything. Both fit inside the
+    // second or so the user spends dragging, so the worker is started with the
+    // shortcut and told which file to read once there is one. Closing its input
+    // without a path — Esc, or a capture that failed — makes it exit.
+    private var textStandby: (process: Process, input: FileHandle)?
+    /// Every standby worker until it has exited, so each one is reaped.
+    private var textWorkers: [Process] = []
+    /// When a capture was last handed to a standby worker.
+    private var textHandedOffAt: Date?
+
     #if canImport(Sparkle)
     // The menu bar host is the only long-lived AIShot process — capture workers
     // exit within seconds of doing their job — so it is the one that owns update
@@ -1371,6 +1404,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             log("capture already in progress — ignored duplicate trigger")
             return
         }
+        if let handedOff = textHandedOffAt, Date().timeIntervalSince(handedOff) < 0.3 {
+            log("capture already in progress — ignored duplicate trigger")
+            return
+        }
         guard CGPreflightScreenCaptureAccess() else {
             launchCaptureWorker(ocr: ocr)
             return
@@ -1403,17 +1440,73 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         regionCapture = session
         regionCaptureLock = lock
+        if ocr { startTextStandby() }
+    }
+
+    private func startTextStandby() {
+        // One capture runs at a time, so none should be left over. If one is,
+        // closing its input lets it exit instead of waiting on a path for ever.
+        if let leftover = textStandby { try? leftover.input.close() }
+        textStandby = nil
+        guard let executable = Bundle.main.executableURL else { return }
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = ["--ocr-standby"]
+        let pipe = Pipe()
+        process.standardInput = pipe
+        process.terminationHandler = { [weak self] finished in
+            DispatchQueue.main.async { self?.textWorkers.removeAll { $0 === finished } }
+        }
+        do { try process.run() } catch {
+            log("could not start the Copy Text worker ahead of the capture: \(error)")
+            return
+        }
+        textWorkers.append(process)
+        // With this end closed, a worker that died leaves nobody reading, and
+        // the write below fails instead of vanishing into the pipe. F_SETNOSIGPIPE
+        // turns that failure into an error rather than a signal that would take
+        // the host down with it.
+        try? pipe.fileHandleForReading.close()
+        _ = fcntl(pipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        textStandby = (process, pipe.fileHandleForWriting)
+    }
+
+    /// Hands the finished capture to the standby worker. False when there is
+    /// none to take it, in which case a worker is launched the ordinary way.
+    private func deliverToTextStandby(path: String, capturedAt: TimeInterval) -> Bool {
+        guard let standby = textStandby else { return false }
+        textStandby = nil
+        defer { try? standby.input.close() }
+        // One line: the uptime, a tab, the path.
+        guard standby.process.isRunning, !path.contains("\n"),
+              let line = "\(capturedAt)\t\(path)\n".data(using: .utf8) else { return false }
+        let written = line.withUnsafeBytes {
+            Darwin.write(standby.input.fileDescriptor, $0.baseAddress, $0.count)
+        }
+        return written == line.count
     }
 
     private func regionCaptureFinished(path: String, ocr: Bool, front: String?, status: Int32) {
+        let capturedAt = ProcessInfo.processInfo.systemUptime
         regionCapture = nil
         if let regionCaptureLock { Darwin.close(regionCaptureLock) }
         regionCaptureLock = nil
         guard fm.fileExists(atPath: path) else {
+            if let textStandby { try? textStandby.input.close() }
+            textStandby = nil
             log("nothing captured (screencapture exit \(status)) — Esc pressed, or capture failed")
             return
         }
-        var arguments = ["--deliver", path]
+        // A standby worker is already running: it takes the capture lock as soon
+        // as it has read the path and holds it until the text is on the
+        // clipboard, and that lock is what keeps a second capture from starting
+        // under it. The short gate covers the moment between this process
+        // letting go of the lock above and the worker picking it up.
+        if ocr, deliverToTextStandby(path: path, capturedAt: capturedAt) {
+            textHandedOffAt = Date()
+            return
+        }
+        var arguments = ["--deliver", path, "--captured-at", String(capturedAt)]
         if ocr { arguments.append("--ocr") }
         if let front { arguments += ["--assume-front", front] }
         deliveryStartedAt = Date()
@@ -1656,11 +1749,17 @@ func effectiveRoute() -> RoutePlan {
                      autoPaste: false)
 }
 
+// NSRunningApplication refreshes isFinishedLaunching and isTerminated only when
+// the run loop turns. Slept through instead, an app seen before it finished
+// launching never appeared to finish: measured with a test app that takes 1.5 s
+// to launch, the flag was still false after 4 s of sleeping and true after one
+// pass of the run loop. That made every destination AIShot had to open wait
+// out the full 10 s and end as clipboard-only.
 func waitUntilFinishedLaunching(_ app: NSRunningApplication, attempts: Int = 100) -> Bool {
     for _ in 0..<attempts {
         if app.isTerminated { return false }
         if app.isFinishedLaunching { return true }
-        usleep(100_000)
+        pauseServicingRunLoop(0.1)
     }
     return false
 }
@@ -1676,7 +1775,7 @@ func launchApplication(bundleID: String, at url: URL) -> NSRunningApplication? {
             log("destination \(bundleID) did not finish launching — clipboard only")
             return nil
         }
-        usleep(100_000)
+        pauseServicingRunLoop(0.1)
     }
     log("could not launch destination \(bundleID) — clipboard only")
     return nil
@@ -1741,8 +1840,9 @@ func activateDestination(_ app: NSRunningApplication) -> Bool {
         let deadline = Date(timeIntervalSinceNow: seconds)
         repeat {
             if isDestinationFrontmost() { return true }
-            let sliceEnd = min(deadline, Date(timeIntervalSinceNow: 0.1))
-            _ = RunLoop.current.run(mode: .default, before: sliceEnd)
+            // Not RunLoop.run alone: with no source attached it returns at
+            // once, and this loop would spin a core until the deadline.
+            pauseServicingRunLoop(min(0.02, max(0, deadline.timeIntervalSinceNow)))
         } while Date() < deadline
         return isDestinationFrontmost()
     }
@@ -2104,6 +2204,33 @@ if chooseDir {
     exit(0)
 }
 
+// MARK: - Copy Text standby
+
+// Started by the host together with the Copy Text shortcut. The recognizer
+// loads while the user selects; the capture to read arrives on standard input
+// as "<uptime>\t<path>" once it exists. Input that closes without a line means
+// the capture was cancelled, and there is nothing to do or to say.
+if ocrStandby {
+    textRecognizerWarmUp.enter()
+    DispatchQueue.global(qos: .userInitiated).async {
+        warmTextRecognition()
+        textRecognizerWarmUp.leave()
+    }
+    guard let line = readLine(strippingNewline: true),
+          let tab = line.firstIndex(of: "\t") else { exit(0) }
+    capturedAtUptime = Double(line[..<tab])
+    deliverPath = String(line[line.index(after: tab)...])
+}
+
+/// " (0.42s after the capture)" for the log, when the capture's time is known —
+/// the one number that says how long the user waited for the result.
+func sinceCapture() -> String {
+    guard let capturedAtUptime else { return "" }
+    let seconds = ProcessInfo.processInfo.systemUptime - capturedAtUptime
+    guard seconds >= 0, seconds < 600 else { return "" }
+    return String(format: " (%.2fs after the capture)", seconds)
+}
+
 // MARK: - capture
 
 // An older launcher may still send a capture command while the shortcut
@@ -2167,6 +2294,25 @@ var scrollFollowUpText: String?
 /// A bounded copy of the capture for the clipboard, when the full-resolution one
 /// is too large to hand another app. The saved PNG is always the full one.
 var scrollClipboardImagePath: String?
+
+// The "scrolling capture complete" panel and chime, while the delivery they
+// announce carries on underneath. The panel used to be waited out first, all
+// 2.6 s of it, and only then was the capture copied and pasted — so the paste
+// arrived three seconds after the chime that said the capture was done. Now
+// the panel goes up, delivery runs, and the process stays for what is left of
+// the panel's time once the delivery has finished.
+var completionAnnouncedAt: Date?
+var completionHUD: NSWindow?
+func lingerForCompletionHUD() {
+    guard let announced = completionAnnouncedAt else { return }
+    completionAnnouncedAt = nil
+    let remaining = max(0, 2.2 - Date().timeIntervalSince(announced))
+    if let panel = completionHUD {
+        dismissHUD(panel, after: remaining)
+    } else {
+        pauseServicingRunLoop(remaining) // no panel, but the chime still plays
+    }
+}
 
 // Whether a finished scrolling capture announces itself. On by default: the run
 // takes tens of seconds with nothing on screen after the overlay closes, so
@@ -2304,6 +2450,10 @@ if scrollMode {
     case .failure(let error):
         reportFailure(t("캡처에 실패했습니다 (\(error)).", "Capture failed (\(error))."))
     case .success(let result):
+        // The last frame is in: what the log reports as time since the capture
+        // counts from here, and so does the wait for the focus hand-off, which
+        // saving the file below more than covers.
+        capturedAtUptime = ProcessInfo.processInfo.systemUptime
         guard writePNG(result.image, to: savePath) else { fail("could not write \(savePath)") }
         log("scrolling capture: \(result.frameCount) frames → \(result.image.width)×\(result.image.height)")
         if let warning = result.warning { log("scrolling capture warning: \(warning)") }
@@ -2375,8 +2525,10 @@ if scrollMode {
                 title: t("스크롤 캡처 완료", "Scrolling capture complete"),
                 body: t("\(result.frameCount)개 프레임 · \(size)\n\(file)",
                         "\(result.frameCount) frames · \(size)\n\(file)"))
-            showHUD(t("✓  스크롤 캡처 완료 — \(result.frameCount)개 프레임 · \(size)",
-                      "✓  Scrolling capture complete — \(result.frameCount) frames · \(size)"))
+            completionHUD = presentHUD(
+                t("✓  스크롤 캡처 완료 — \(result.frameCount)개 프레임 · \(size)",
+                  "✓  Scrolling capture complete — \(result.frameCount) frames · \(size)"))
+            completionAnnouncedAt = Date()
         }
     }
 } else if deliverPath == nil {
@@ -2384,7 +2536,12 @@ if scrollMode {
     // external launcher (`--capture`, `--ocr`) or by the host's fallback.
     let session = RegionCaptureSession(path: savePath, timeout: timeout)
     var captureStatus: Int32?
-    do { try session.start { captureStatus = $0 } } catch { fail("cannot run screencapture: \(error)") }
+    do {
+        try session.start {
+            captureStatus = $0
+            capturedAtUptime = ProcessInfo.processInfo.systemUptime
+        }
+    } catch { fail("cannot run screencapture: \(error)") }
     while captureStatus == nil { pauseServicingRunLoop(0.05) }
     withExtendedLifetime(session) {}
 
@@ -2403,6 +2560,9 @@ func recognizeTextShowingProgress(in image: CGImage) throws -> String {
     var outcome: Result<String, Error>?
     let started = Date()
     DispatchQueue.global(qos: .userInitiated).async {
+        // A standby worker may still be loading the recognizer when a quick
+        // selection arrives. Wait for that load rather than start a second one.
+        textRecognizerWarmUp.wait()
         let result = Result { try recognizeText(in: image, usesLanguageCorrection: false) }
         DispatchQueue.main.async { outcome = result }
     }
@@ -2412,7 +2572,7 @@ func recognizeTextShowingProgress(in image: CGImage) throws -> String {
             progress = presentHUD(t("텍스트 인식 중… 잠시만 기다려 주세요",
                                     "Reading text… one moment"))
         }
-        pauseServicingRunLoop(0.03)
+        pauseServicingRunLoop(0.01)
     }
     progress?.orderOut(nil)
     let seconds = Date().timeIntervalSince(started)
@@ -2423,6 +2583,13 @@ func recognizeTextShowingProgress(in image: CGImage) throws -> String {
 // OCR copy has its own delivery path: a pinned terminal, pasteSubmit or an image
 // preference must never turn recognized text into a path or a keystroke.
 if ocrMode {
+    // What follows the recognition is a panel that stays up for a couple of
+    // seconds. Holding the capture lock through it made the next shortcut
+    // press do nothing until the panel had faded, so the lock goes first.
+    func releaseCaptureLock() {
+        if let captureLock { Darwin.close(captureLock) }
+        captureLock = nil
+    }
     do {
         guard let image = NSImage(contentsOfFile: savePath)?.cgImage(
             forProposedRect: nil, context: nil, hints: nil) else {
@@ -2431,6 +2598,7 @@ if ocrMode {
         let text = try recognizeTextShowingProgress(in: image)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             log("ocr: no text recognized — clipboard unchanged; saved \(savePath)")
+            releaseCaptureLock()
             showHUD(t("인식된 텍스트가 없습니다. 클립보드를 유지했습니다.",
                       "No text found. Clipboard unchanged."))
             exit(0)
@@ -2439,26 +2607,90 @@ if ocrMode {
         clipboard.clearContents()
         guard clipboard.setString(text, forType: .string) else {
             log("ocr: could not copy text; saved \(savePath)")
+            releaseCaptureLock()
             showHUD(t("텍스트를 클립보드에 복사하지 못했습니다.",
                       "Could not copy text to the clipboard."))
             exit(1)
         }
-        log("ocr: copied \(text.count) characters to clipboard; saved \(savePath)")
+        log("ocr: copied \(text.count) characters to clipboard\(sinceCapture()); saved \(savePath)")
+        releaseCaptureLock()
         showHUD(t("✓  텍스트 복사 완료 — \(text.count)자", "✓  Text copied — \(text.count) characters"))
         exit(0)
     } catch {
         log("ocr failed: \(error) — clipboard unchanged; saved \(savePath)")
+        releaseCaptureLock()
         showHUD(t("텍스트 인식에 실패했습니다. 클립보드를 유지했습니다.",
                   "Text recognition failed. Clipboard unchanged."))
         exit(1)
     }
 }
 
+// MARK: - clipboard
+
+/// The image flavours of a capture for the clipboard, read and converted once.
+struct ClipboardImage {
+    let png: Data?
+    let tiff: Data?
+}
+
+func loadClipboardImage() -> ClipboardImage {
+    // The image bytes may come from a bounded copy; see copyCaptureToPasteboard.
+    guard let png = fm.contents(atPath: scrollClipboardImagePath ?? savePath) else {
+        return ClipboardImage(png: nil, tiff: nil)
+    }
+    // The TIFF flavor exists for picky receivers, but it is uncompressed — a
+    // stitched full-page capture decodes to a gigabyte-class buffer that the
+    // pasteboard server refuses, and the failed set aborts nothing while
+    // wasting seconds. PNG + file URL cover every destination we route to, so
+    // past a sane size TIFF is skipped.
+    let tiff = png.count < 24_000_000 ? NSImage(data: png)?.tiffRepresentation : nil
+    return ClipboardImage(png: png, tiff: tiff)
+}
+
+/// Builds the clipboard image off the main thread while the run is waiting
+/// anyway. The TIFF flavor of a full-screen capture takes 60 ms to make
+/// (20 ms for a 1600×1000 region), which used to be spent after the waits,
+/// between activating the destination and pasting into it.
+final class ClipboardImageLoader {
+    private let ready = DispatchGroup()
+    private var started = false
+    private var image: ClipboardImage?
+
+    func start() {
+        guard !started else { return }
+        started = true
+        ready.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.image = loadClipboardImage()
+            self.ready.leave()
+        }
+    }
+
+    func get() -> ClipboardImage {
+        if started { ready.wait() }
+        if let image { return image }
+        let loaded = loadClipboardImage()
+        image = loaded
+        return loaded
+    }
+}
+let clipboardImage = ClipboardImageLoader()
+// Only when an image is what will be copied: a path or recognized text makes
+// the conversion wasted work.
+if scrollClipboardText == nil, !deliversToShelfOnly, effectiveRoute().mode != "path" {
+    clipboardImage.start()
+}
+
 // screencapture can report completion just before WindowServer restores focus
 // to the source app. Let that hand-off finish before routing to a destination.
-usleep(300_000)
-
-// MARK: - clipboard
+// Counted from the moment screencapture exited: a worker launched by the host
+// has already spent 0.1–0.3 s of it getting started, and sleeping the full
+// length on top of that made every paste later by exactly that much.
+let focusHandOff: TimeInterval = 0.3
+let sinceScreencaptureExit = capturedAtUptime.map { ProcessInfo.processInfo.systemUptime - $0 } ?? 0
+if sinceScreencaptureExit < focusHandOff {
+    usleep(useconds_t((focusHandOff - max(0, sinceScreencaptureExit)) * 1_000_000))
+}
 
 // Backslash-escape shell specials, exactly like dragging a file into a terminal.
 func shellEscape(_ path: String) -> String {
@@ -2497,17 +2729,9 @@ func copyCaptureToPasteboard() -> Int {
         // The image bytes may come from a bounded copy; the file URL always
         // points at the full-resolution capture, so anything resolving the
         // reference rather than the data still gets everything.
-        if let png = fm.contents(atPath: scrollClipboardImagePath ?? savePath) {
-            item.setData(png, forType: .png)
-            // The TIFF flavor exists for picky receivers, but it is uncompressed
-            // — a stitched full-page capture decodes to a gigabyte-class buffer
-            // that the pasteboard server refuses, and the failed set aborts
-            // nothing while wasting seconds. PNG + file URL cover every
-            // destination we route to, so past a sane size TIFF is skipped.
-            if png.count < 24_000_000, let tiff = NSImage(data: png)?.tiffRepresentation {
-                item.setData(tiff, forType: .tiff)
-            }
-        }
+        let image = clipboardImage.get()
+        if let png = image.png { item.setData(png, forType: .png) }
+        if let tiff = image.tiff { item.setData(tiff, forType: .tiff) }
         item.setString(URL(fileURLWithPath: savePath).absoluteString, forType: .fileURL)
         pb.writeObjects([item])
     }
@@ -2550,6 +2774,7 @@ func finishDelivery() -> Never {
         log("also added the capture to a Dropover shelf")
     }
     log("saved \(savePath)")
+    lingerForCompletionHUD()
     exit(0)
 }
 
@@ -2564,12 +2789,13 @@ if deliversToShelfOnly {
         log("could not reach Dropover — copied \(deliveredKind) to clipboard instead")
     }
     log("saved \(savePath)")
+    lingerForCompletionHUD()
     exit(0)
 }
 
 guard route.autoPaste else {
     copyCaptureToPasteboard()
-    log("copied \(deliveredKind) to clipboard — paste with ⌘V")
+    log("copied \(deliveredKind) to clipboard — paste with ⌘V\(sinceCapture())")
     finishDelivery()
 }
 
@@ -2585,6 +2811,19 @@ guard AXIsProcessTrusted() else {
 var destination = route.app
 if destination == nil, let bundleID = route.bundleID, let launchURL = route.launchURL {
     destination = launchApplication(bundleID: bundleID, at: launchURL)
+    // "Finished launching" comes before the first window for many apps, and
+    // there is nothing to paste into until one exists. Bounded, and skipped as
+    // soon as a window is there.
+    if let launched = destination {
+        let axApp = AXUIElementCreateApplication(launched.processIdentifier)
+        AXUIElementSetMessagingTimeout(axApp, 0.3)
+        let deadline = Date(timeIntervalSinceNow: 5)
+        while Date() < deadline, !launched.isTerminated,
+              axElementAttribute(axApp, kAXFocusedWindowAttribute) == nil,
+              axElementAttribute(axApp, kAXMainWindowAttribute) == nil {
+            pauseServicingRunLoop(0.1)
+        }
+    }
 }
 
 guard let dest = destination else {
@@ -2651,6 +2890,8 @@ guard !dest.isTerminated, destinationIdentityMatches else {
 }
 let destinationIsFrontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
     == dest.processIdentifier
+// Taken before the keystroke, which is followed by a fixed pause of its own.
+let pasteTiming = sinceCapture()
 guard postPasteShortcut(to: dest) else {
     log("destination or keyboard event source became unavailable — skipped ⌘V")
     finishDelivery()
@@ -2659,9 +2900,9 @@ let targetName = dest.localizedName ?? dest.bundleIdentifier ?? "?"
 // "Sent", not "pasted": whether the app accepted ⌘V is not observable from
 // here, and a log that claimed success hid every dropped Muse paste.
 if destinationIsFrontmost {
-    log("sent \(deliveredKind) paste (⌘V) to \(targetName)")
+    log("sent \(deliveredKind) paste (⌘V) to \(targetName)\(pasteTiming)")
 } else {
-    log("sent \(deliveredKind) paste (⌘V) to \(targetName) after focus moved away")
+    log("sent \(deliveredKind) paste (⌘V) to \(targetName) after focus moved away\(pasteTiming)")
 }
 // doublePaste only makes sense on top of an image paste — in path mode the
 // destination is a terminal that got the file path, and the sidecar .txt sits
