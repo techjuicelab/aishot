@@ -402,7 +402,10 @@ open -gnb space.techjuicelab.aishot --args --ocr
 
 인자 없이 실행하면, 메뉴 막대 호스트가 떠 있지 않을 때는 호스트를 시작하고
 (Finder·Spotlight에서 앱을 열 때, 권한 프롬프트의 "종료 후 다시 열기" 뒤 재실행),
-떠 있을 때는 기존처럼 일회성 일반 캡처를 시작한다.
+떠 있을 때는 기존처럼 일회성 일반 캡처를 시작한다. 단, 호스트가 이미 떠 있는데
+macOS가 로그인 항목(System Settings → General → Login Items → Open at Login)으로
+AIShot을 연 경우에는 아무것도 하지 않는다. 로그인 시 실행은 LaunchAgent가 이미
+맡고 있으므로 그 목록에 AIShot을 넣을 필요는 없다.
 
 ## 첫 실행 권한 (한 번만)
 

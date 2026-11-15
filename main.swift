@@ -435,6 +435,77 @@ if !showMenuBar, CommandLine.arguments.count == 1,
     log("opened without arguments while no menu bar host was running — starting the host")
 }
 
+// MARK: - login item launch
+
+// The LaunchAgent already starts the host at login. If AIShot is also listed
+// under System Settings → General → Login Items → Open at Login, loginwindow
+// opens the bundle again a moment later, with no arguments. When the host won
+// that race, the run above does not claim it, and an argument-less launch with
+// a host running is a capture — so every login threw a capture crosshair at the
+// user. loginwindow marks its launch in the open-application Apple event
+// (keyAEPropData = keyAELaunchedAsLogInItem), which `open`, Finder, Spotlight
+// and external launchers never do; that mark, not timing, is what ends the run.
+//
+// Reading the event means connecting to the window server and waiting for
+// AppKit to deliver it, about 0.1 s in a fresh process — time a launcher-driven
+// capture should not spend before its overlay. So only a launch shortly after
+// the host itself started pays it: login items are opened during login, the
+// same moment the LaunchAgent starts the host.
+let loginItemCheckWindow: TimeInterval = 120
+
+/// How long ago the menu bar host holding the lock started, if one does.
+func menuBarHostAge() -> TimeInterval? {
+    let lockPath = NSTemporaryDirectory()
+        + "space.techjuicelab.aishot.\(getuid()).menubar.lock"
+    guard let holder = try? Install.lockHolderPID(lockPath: lockPath) else { return nil }
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, holder]
+    guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+    let start = info.kp_proc.p_starttime
+    let started = Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
+    return Date().timeIntervalSince1970 - started
+}
+
+final class LaunchEventProbe: NSObject {
+    var received = false
+    var asLoginItem = false
+    @objc func openApplication(_ event: NSAppleEventDescriptor,
+                               withReplyEvent reply: NSAppleEventDescriptor) {
+        // The descriptor is only valid inside the handler.
+        received = true
+        asLoginItem = event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue
+            == OSType(keyAELaunchedAsLogInItem)
+    }
+}
+
+/// Whether loginwindow opened this process as a login item. A launch that
+/// carries no open-application event in time is treated as not one.
+func launchedAsLoginItem(timeout: TimeInterval = 1) -> Bool {
+    let app = NSApplication.shared
+    let probe = LaunchEventProbe()
+    let events = NSAppleEventManager.shared()
+    let eventClass = AEEventClass(kCoreEventClass), eventID = AEEventID(kAEOpenApplication)
+    events.setEventHandler(probe, andSelector: #selector(LaunchEventProbe.openApplication(_:withReplyEvent:)),
+                           forEventClass: eventClass, andEventID: eventID)
+    defer { events.removeEventHandler(forEventClass: eventClass, andEventID: eventID) }
+    let deadline = Date(timeIntervalSinceNow: timeout)
+    // Apple events are dispatched to their handlers while the queue is read;
+    // a process with no window has nothing else in it worth keeping.
+    while !probe.received, Date() < deadline {
+        _ = app.nextEvent(matching: .any, until: Date(timeIntervalSinceNow: 0.02),
+                          inMode: .default, dequeue: true)
+    }
+    return probe.asLoginItem
+}
+
+if !showMenuBar, CommandLine.arguments.count == 1,
+   let age = menuBarHostAge(), age < loginItemCheckWindow,
+   launchedAsLoginItem() {
+    log("opened as a login item while the menu bar host is running — nothing to capture")
+    exit(0)
+}
+
 // MARK: - environment
 
 // Save-location priority: --out flag → app setting (saveDir, set with

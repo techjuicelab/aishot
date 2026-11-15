@@ -427,7 +427,10 @@ open -gnb space.techjuicelab.aishot --args --ocr
 Launching without arguments starts the menu bar host when it is not running
 (opening the app from Finder or Spotlight, or the relaunch after macOS's
 "Quit & Reopen" permission prompt) and otherwise starts a one-shot regular
-capture, as before.
+capture, as before. The one exception is macOS opening AIShot as a login item
+(System Settings → General → Login Items → Open at Login) while the host is
+already running: that launch does nothing. The LaunchAgent already starts the
+host at login, so AIShot does not need to be listed there.
 
 ## First-run permissions (one-time)
 
