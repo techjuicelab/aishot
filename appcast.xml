@@ -3,6 +3,17 @@
     <channel>
         <title>AIShot</title>
         <item>
+            <title>1.11.1</title>
+            <pubDate>Sun, 15 Nov 2026 09:25:08 +0900</pubDate>
+            <link>https://github.com/techjuicelab/aishot</link>
+            <sparkle:version>17</sparkle:version>
+            <sparkle:shortVersionString>1.11.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/techjuicelab/aishot/releases/download/v1.11.1/AIShot-1.11.1.zip" length="3652794" type="application/octet-stream" sparkle:edSignature="8wMMUK62Sp2EQntdqRZ8r3kBdhS/MmeGqCdt9L1pYIigtxPzJnfEjU+cxp9AkbTI0VBpcBAOcnW4IuIQbgvMCA=="/>
+            <aishot:sha256>5cce966ccb9709b5ff3b5c2e8aa5f78af57a63c812d1fe38ce0fb8926ba487db</aishot:sha256>
+            <aishot:dmg url="https://github.com/techjuicelab/aishot/releases/download/v1.11.1/AIShot.dmg" length="3939003" sha256="0d3de774a6806e1795ad948ab064d1d5f019143db22524c6a44d9f98846df927" sparkle:edSignature="muKjMXEaFAEH/ZaUXE0MK1dPcUoO8BrE1CdAfnawpfbFnGf3Fvnv9GxWvmJnAE5c/hnviqZdJF5wO9q8ktU0DQ=="/>
+        </item>
+        <item>
             <title>1.11</title>
             <pubDate>Sat, 14 Nov 2026 23:23:26 +0900</pubDate>
             <link>https://github.com/techjuicelab/aishot</link>
