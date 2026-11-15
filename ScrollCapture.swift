@@ -64,11 +64,19 @@ enum ScrollTuning {
     /// the seam is computed from, so losing it loses the stitch.
     static let advanceFraction = 0.80
 
-    /// How long to let a scroll settle before shooting. Covers momentum and
-    /// smooth-scroll animations; frames are compared for stillness on top of
-    /// this, so a slow app costs time rather than correctness.
+    /// How long a window gets to start moving before a still frame is taken to
+    /// mean "nothing below". Covers an app that is slow to act on the scroll
+    /// and the ease-in of a smooth-scroll animation.
     static let settleSeconds = 0.28
     static let maxSettleSeconds = 1.6
+
+    /// When the first frame after a scroll burst is shot, and how far apart the
+    /// ones that follow are. A window that has visibly moved and then holds
+    /// still between two shots is done, however early that is; most are within
+    /// 0.15 s, and waiting out settleSeconds for each of them was a third of
+    /// the time a capture took.
+    static let firstLookSeconds = 0.09
+    static let shotInterval = 0.06
 
     /// Safety stop. An infinite-scroll page never reaches the bottom, and a
     /// runaway loop that fills memory with frames is worse than a short capture.
@@ -212,6 +220,7 @@ func onScreenWindows(excluding pid: pid_t) -> [CandidateWindow] {
 final class PickerInput {
     /// Shared with the C callback, which cannot capture context.
     final class State {
+        var tap: CFMachPort?
         var cancelled = false
         /// Display coordinates, top-left origin — the same space window bounds
         /// come back in, so the hit test needs no conversion.
@@ -242,9 +251,13 @@ final class PickerInput {
             case .leftMouseDown:
                 state.clickedAt = event.location
                 return nil
+            case .tapDisabledByTimeout, .tapDisabledByUserInput:
+                // macOS switches a tap off when its callback is slow to answer,
+                // which a busy moment is enough to cause. Left off, the picker
+                // stays on screen with nothing reading its clicks or Esc.
+                if let tap = state.tap { CGEvent.tapEnable(tap: tap, enable: true) }
+                return Unmanaged.passUnretained(event)
             default:
-                // Includes the disabled-by-timeout notifications, which carry no
-                // useful payload here — pass everything else straight through.
                 return Unmanaged.passUnretained(event)
             }
         }
@@ -263,6 +276,7 @@ final class PickerInput {
         else { return nil }
 
         self.tap = tap
+        state.tap = tap
         source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
@@ -588,7 +602,19 @@ final class WindowShooter {
         // Capture at backing-store resolution: the stitched result should be as
         // sharp as the screen, and downscaling later is lossless-ish while
         // upscaling is not.
-        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        //
+        // The scale is that of the display showing most of the window, not of
+        // NSScreen.main: that one is the display with the key window, which for
+        // a capture worker is an arbitrary choice, and on a desk with a Retina
+        // and a non-Retina display it shot one of them at the other's scale.
+        let windowFrame = displayRectToAppKit(match.frame)
+        func visibleArea(on screen: NSScreen) -> CGFloat {
+            let shared = screen.frame.intersection(windowFrame)
+            return shared.isNull ? 0 : shared.width * shared.height
+        }
+        let mostVisible = NSScreen.screens.max { visibleArea(on: $0) < visibleArea(on: $1) }
+        let shownOn = mostVisible.flatMap { visibleArea(on: $0) > 0 ? $0 : nil } ?? NSScreen.main
+        let scale = shownOn?.backingScaleFactor ?? 2.0
         configuration.width = Int(match.frame.width * scale)
         configuration.height = Int(match.frame.height * scale)
     }
@@ -1005,19 +1031,99 @@ func raiseWindow(_ candidate: CandidateWindow, trace: (String) -> Void = { _ in 
     return true
 }
 
+// MARK: - settling
+
+/// Waits for the window to come to rest after a scroll burst and returns the
+/// frame that shows it there, or nil if not even one frame could be shot.
+///
+/// Two consecutive shots that agree mean the window is still. That is only the
+/// end of the scroll if the window has also moved away from `previous`; a
+/// still, unmoved window may simply not have started yet, and concluding
+/// "bottom of the page" from it would cut the capture short. So an unmoved
+/// window is given the full settleSeconds before it is believed, exactly as
+/// long as before — only a window seen moving can finish early.
+///
+/// "Moved" asks for more than a few differing rows. A blinking cursor or a
+/// spinner changes a handful of rows without any scrolling, and taking that
+/// for movement would accept a frame shot before the scroll began.
+///
+/// Generic over the frame so the timing can be tested without a screen.
+func settledFrame<Frame>(after previous: FrameSignature,
+                         shoot: () -> (frame: Frame, signature: FrameSignature)?,
+                         pause: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+                         clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime })
+    -> (frame: Frame, signature: FrameSignature)? {
+    let start = clock()
+    pause(ScrollTuning.firstLookSeconds)
+    guard var latest = shoot() else { return nil }
+    let giveUpAfter = ScrollTuning.settleSeconds + ScrollTuning.maxSettleSeconds
+    while clock() - start < giveUpAfter {
+        pause(ScrollTuning.shotInterval)
+        guard let shot = shoot() else { break }
+        let still = shot.signature.differingRows(against: latest.signature) == 0
+        latest = shot
+        guard still else { continue }
+        let movedRows = latest.signature.differingRows(against: previous)
+        if movedRows >= max(16, previous.height / 20) { break }
+        if clock() - start >= ScrollTuning.settleSeconds { break }
+    }
+    return latest
+}
+
 // MARK: - stitching
+
+/// How many rows at the bottom of a frame the window's rounded corners cut
+/// into: the rows whose first or last pixel lies outside the window, which a
+/// window capture reports as transparent. Zero for a window with square
+/// corners, and for an image without an alpha channel.
+func bottomCornerRows(of frame: CGImage) -> Int {
+    switch frame.alphaInfo {
+    case .none, .noneSkipFirst, .noneSkipLast: return 0
+    default: break
+    }
+    let probe = min(frame.height, 160)
+    guard probe > 0, frame.width > 1 else { return 0 }
+    func transparentRows(atColumn x: Int) -> Int {
+        guard let column = frame.cropping(to: CGRect(x: x, y: frame.height - probe, width: 1, height: probe))
+        else { return 0 }
+        var pixels = [UInt8](repeating: 0, count: probe * 4)
+        let drawn: Bool = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: 1, height: probe,
+                                          bitsPerComponent: 8, bytesPerRow: 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.draw(column, in: CGRect(x: 0, y: 0, width: 1, height: probe))
+            return true
+        }
+        guard drawn else { return 0 }
+        // The buffer runs top-down, so its last pixel is the frame's bottom row.
+        var rows = 0
+        while rows < probe, pixels[(probe - 1 - rows) * 4 + 3] < 128 { rows += 1 }
+        // A column that is transparent all the way up is not a corner.
+        return rows < probe ? rows : 0
+    }
+    return max(transparentRows(atColumn: 0), transparentRows(atColumn: frame.width - 1))
+}
 
 /// Concatenates frames using the measured advances, cropping the sticky bands.
 ///
 /// The first frame is kept whole — its header is the real one, seen before
-/// anything scrolled — and later frames contribute only their newly revealed
-/// band.
+/// anything scrolled — and later frames contribute their newly revealed band.
+///
+/// They also redraw the bottom edge of the frame before them. That edge is not
+/// page content in any frame but the last: the window's rounded corners cut
+/// into it, and a floating footer covers it. Left as shot, every seam carried a
+/// pair of black corner wedges — 30 px each on a current macOS window — and a
+/// copy of the footer over the lines it was hiding. The next frame shows the
+/// same rows higher up, clear of both, so its copy of them goes on top.
 func stitch(frames: [CGImage], advances: [Int], sticky: (top: Int, bottom: Int)) -> CGImage? {
     guard let first = frames.first else { return nil }
     let width = first.width
     let frameHeight = first.height
     let bodyHeight = frameHeight - sticky.top - sticky.bottom
     guard bodyHeight > 0 else { return nil }
+    let untrustedTail = max(sticky.bottom, bottomCornerRows(of: first))
 
     let totalHeight = frameHeight + advances.reduce(0, +)
     guard totalHeight > 0, totalHeight <= 200_000 else { return nil }
@@ -1044,10 +1150,14 @@ func stitch(frames: [CGImage], advances: [Int], sticky: (top: Int, bottom: Int))
         let stripTop = drawnFromTop
         let stripHeight = advance
         guard stripHeight > 0 else { continue }
+        // How far up into the previous frame's bottom edge this one reaches.
+        // Never into its own sticky header, which sits where page content was
+        // in the frame before.
+        let lift = max(0, min(untrustedTail, frameHeight - advance - sticky.top))
 
         context.saveGState()
         context.clip(to: CGRect(x: 0, y: totalHeight - stripTop - stripHeight,
-                                width: width, height: stripHeight))
+                                width: width, height: stripHeight + lift))
         // The frame's own row (frameHeight - advance) has to land at stripTop.
         let frameTop = stripTop - (frameHeight - advance)
         context.draw(frame, in: CGRect(x: 0, y: totalHeight - frameTop - frameHeight,
@@ -1095,8 +1205,10 @@ func runScrollCapture(window candidate: CandidateWindow,
     raiseWindow(candidate, trace: trace)
     // The shutter here confirms the click landed and the capture has begun. It
     // matters more than it would for a region shot: this one runs for tens of
-    // seconds, and the overlay is already gone.
-    playShutter()
+    // seconds, and the overlay is already gone. Not waited for: the capture
+    // goes on for seconds, so the sound has all the time it needs, and waiting
+    // held every capture back by the half second it plays.
+    playShutter(waitingUntilDone: false)
     // Let the raise finish compositing. A frame shot mid-animation matches
     // nothing and poisons the very first advance measurement.
     Thread.sleep(forTimeInterval: 0.35)
@@ -1163,19 +1275,16 @@ func runScrollCapture(window candidate: CandidateWindow,
         // Wait for the scroll to settle: shoot repeatedly and stop once two
         // consecutive shots agree. A fixed sleep is either too short for a
         // smooth-scrolling app or wasted on a snappy one.
-        Thread.sleep(forTimeInterval: ScrollTuning.settleSeconds)
-        let settleDeadline = Date(timeIntervalSinceNow: ScrollTuning.maxSettleSeconds)
-        guard var nextImage = shooter.shoot(), var nextSignature = frameSignature(of: nextImage) else {
+        let settled: (frame: CGImage, signature: FrameSignature)? =
+            settledFrame(after: currentSignature, shoot: {
+                guard let shot = shooter.shoot(), let signature = frameSignature(of: shot) else { return nil }
+                return (shot, signature)
+            })
+        guard let settled else {
             return .failure(.captureFailed("frame \(frames.count + 1)"))
         }
-        while Date() < settleDeadline {
-            Thread.sleep(forTimeInterval: 0.06)
-            guard let shot = shooter.shoot(), let signature = frameSignature(of: shot) else { break }
-            let moved = signature.differingRows(against: nextSignature)
-            nextImage = shot
-            nextSignature = signature
-            if moved == 0 { break }
-        }
+        let nextImage = settled.frame
+        let nextSignature = settled.signature
 
         let movedRows = currentSignature.differingRows(against: nextSignature)
         trace("step \(frames.count): \(linesPerStep) lines → \(movedRows) rows differ")
@@ -1307,72 +1416,175 @@ enum TextRecognitionError: Error {
 /// and tiling also bounds memory. The overlap guarantees every text line falls
 /// completely inside at least one tile; each line is then attributed to exactly
 /// one tile by its centre, so the seams neither cut nor duplicate lines.
+///
+/// Vision does not fail loudly on a tile it cannot handle. It answers with no
+/// error and part of the text, or none of it, and which tiles it does that to
+/// follows no rule simple enough to steer around. Three things are done about
+/// it, each measured on generated pages of ordinary 20–32 px text:
+///
+///   - A capture wider than `maxTileWidth` is read through overlapping windows
+///     across its width. Up to 3840 px wide, tiles were read; from 4000 px on,
+///     whole tiles came back empty — 10 of 24 at 5120 px, the width of a window
+///     filling a 5K display, where a page read 0 of 226 lines. The windows
+///     overlap by at least 1280 px, so a line shorter than that is whole in
+///     one of them, and `mergingWindows` sorts out the rest.
+///   - Tiles are at most 2400 px tall. At 3600 px, eight pages between 1312
+///     and 3840 px wide lost 221 of 2726 lines, in runs of ten and twenty; at
+///     2400 px, 55.
+///   - A stretch of a tile that shows something and has no line read in it is
+///     read again on its own, cropped to what is in it (`unreadBands`). With
+///     that the same eight pages lost 29 lines, and the 5120-px page read 222
+///     of its 226.
 func recognizeText(in image: CGImage, usesLanguageCorrection: Bool = true,
                    progress: (Int, Int) -> Void = { _, _ in }) throws -> String {
     let width = image.width
     let height = image.height
     guard width > 0, height > 0 else { throw TextRecognitionError.invalidImage }
 
-    // Tile height is tied to the tile's *aspect ratio*, not to a fixed number of
-    // pixels, because that is what Vision actually reacts to. Measured on a
-    // 1312-px-wide capture, recognition holds a flat ~2350 characters per 1000
-    // px of height up to a height:width ratio of about 2.2, then falls off a
-    // cliff: 1194 at 2.29, 266 at 2.44, 34 at 2.50 — the tall tile comes back
-    // near-empty rather than partially wrong. A 5120-px-wide capture recognized
-    // 3600-px tiles (ratio 0.70) perfectly, so height alone is not the trigger.
-    //
-    // 1.6 keeps a margin below the cliff; the 3600 cap stays inside the tallest
-    // tile actually measured good rather than extrapolating past it.
-    let tileHeight = min(3600, max(1200, Int(Double(width) * 1.6)))
+    let maxTileWidth = 3840
+    let minimumWindowOverlap = 1280
+    var windowOrigins = [0]
+    if width > maxTileWidth {
+        let stride = maxTileWidth - minimumWindowOverlap
+        let count = max(2, (width - minimumWindowOverlap + stride - 1) / stride)
+        windowOrigins = (0 ..< count).map { $0 * (width - maxTileWidth) / (count - 1) }
+    }
+    let windowWidth = min(width, maxTileWidth)
+
+    // Tile height follows the tile's aspect ratio up to the cap. On a
+    // 1312-px-wide capture recognition held a flat ~2350 characters per 1000 px
+    // of height up to a height:width ratio of about 2.2, then fell off a cliff:
+    // 1194 at 2.29, 266 at 2.44, 34 at 2.50. 1.6 keeps a margin below that.
+    let tileHeight = min(2400, max(1200, Int(Double(windowWidth) * 1.6)))
     let overlap = 240
 
     let stride = tileHeight - overlap
     let tileCount = max(1, (height - overlap + stride - 1) / stride)
     var lines: [RecognizedLine] = []
+    var finished = 0
 
     for tileIndex in 0 ..< tileCount {
         let tileTop = tileIndex * stride
         let thisHeight = min(tileHeight, height - tileTop)
         guard thisHeight > 0 else { break }
-        guard let tile = image.cropping(to: CGRect(x: 0, y: tileTop,
-                                                   width: width, height: thisHeight))
-        else { throw TextRecognitionError.tileUnavailable }
-
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["ko-KR", "en-US"]
-        request.usesLanguageCorrection = usesLanguageCorrection
-
-        let handler = VNImageRequestHandler(cgImage: tile)
-        try handler.perform([request])
-        let observations = request.results ?? []
 
         // A line belongs to this tile if its centre lies outside the half-overlap
         // margins; the neighbouring tile owns the margins' lines. Every line is
         // shorter than half the overlap, so exactly one tile claims each.
-        let acceptFrom = tileIndex == 0 ? 0.0 : Double(overlap) / 2
-        let acceptTo = Double(thisHeight)
-            - (tileTop + thisHeight >= height ? 0.0 : Double(overlap) / 2)
+        let owned = CGFloat(tileTop + (tileIndex == 0 ? 0 : overlap / 2))
+            ..< CGFloat(tileTop + thisHeight - (tileTop + thisHeight >= height ? 0 : overlap / 2))
 
-        // Vision's boxes are normalized, origin bottom-left; captures are
-        // reasoned about top-down, in the whole capture's pixels, so lines from
-        // every tile can be laid out together.
-        for observation in observations {
-            guard let candidate = observation.topCandidates(1).first else { continue }
-            let box = observation.boundingBox
-            let centerY = (1.0 - Double(box.midY)) * Double(thisHeight)
-            guard centerY >= acceptFrom, centerY < acceptTo else { continue }
-            let rect = CGRect(x: Double(box.minX) * Double(width),
-                              y: Double(tileTop) + (1.0 - Double(box.maxY)) * Double(thisHeight),
-                              width: Double(box.width) * Double(width),
-                              height: Double(box.height) * Double(thisHeight))
-            lines.append(RecognizedLine(rect: rect, text: candidate.string,
-                                        confidence: observation.confidence))
+        var windows: [RecognizedWindow] = []
+        for origin in windowOrigins {
+            let rect = CGRect(x: origin, y: tileTop, width: windowWidth, height: thisHeight)
+            var read = try recognizeLines(in: image, rect: rect,
+                                          usesLanguageCorrection: usesLanguageCorrection)
+                .filter { owned.contains($0.rect.midY) }
+            read += try rereadingUnreadBands(in: image, rect: rect, owned: owned, lines: read,
+                                             usesLanguageCorrection: usesLanguageCorrection)
+            windows.append(RecognizedWindow(minX: rect.minX, maxX: rect.maxX, lines: read))
+            finished += 1
+            progress(finished, tileCount * windowOrigins.count)
         }
-        progress(tileIndex + 1, tileCount)
+        lines += mergingWindows(windows, captureWidth: CGFloat(width))
     }
-
     return readingOrderText(lines)
+}
+
+/// The lines Vision reads in one rectangle of the capture, in the capture's
+/// own pixels with the origin at the top left.
+private func recognizeLines(in image: CGImage, rect: CGRect,
+                            usesLanguageCorrection: Bool) throws -> [RecognizedLine] {
+    guard let tile = image.cropping(to: rect) else { throw TextRecognitionError.tileUnavailable }
+
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = .accurate
+    request.recognitionLanguages = ["ko-KR", "en-US"]
+    request.usesLanguageCorrection = usesLanguageCorrection
+
+    let handler = VNImageRequestHandler(cgImage: tile)
+    try handler.perform([request])
+
+    // Vision's boxes are normalized, origin bottom-left; captures are reasoned
+    // about top-down, in the whole capture's pixels, so lines from every tile
+    // can be laid out together.
+    return (request.results ?? []).compactMap { observation in
+        guard let candidate = observation.topCandidates(1).first else { return nil }
+        let box = observation.boundingBox
+        return RecognizedLine(
+            rect: CGRect(x: rect.minX + box.minX * rect.width,
+                         y: rect.minY + (1 - box.maxY) * rect.height,
+                         width: box.width * rect.width,
+                         height: box.height * rect.height),
+            text: candidate.string, confidence: observation.confidence)
+    }
+}
+
+/// Reads again the parts of a tile that show something and came back without
+/// text, and returns what that found. Only lines centred in such a part are
+/// returned, so nothing already read can be read twice.
+private func rereadingUnreadBands(in image: CGImage, rect: CGRect, owned: Range<CGFloat>,
+                                  lines: [RecognizedLine],
+                                  usesLanguageCorrection: Bool) throws -> [RecognizedLine] {
+    guard let tile = image.cropping(to: rect), let signature = frameSignature(of: tile) else { return [] }
+    // A row is busy when its sampled pixels are not all the same shade — text,
+    // a picture, anything but flat background.
+    var busy = [Bool](repeating: false, count: signature.height)
+    for y in 0 ..< signature.height {
+        let row = signature.samples[y * signature.columns ..< (y + 1) * signature.columns]
+        if let low = row.min(), let high = row.max(), high - low > 24 { busy[y] = true }
+    }
+    let top = Int(rect.minY)
+    let heights = lines.map { Int($0.rect.height) }.sorted()
+    let lineHeight = heights.isEmpty ? 30 : max(12, heights[heights.count / 2])
+    let bands = unreadBands(busyRows: busy,
+                            lineSpans: lines.map { Int($0.rect.minY) - top ..< Int($0.rect.maxY) - top },
+                            within: max(0, Int(owned.lowerBound) - top) ..< min(busy.count, Int(owned.upperBound) - top),
+                            lineHeight: lineHeight)
+
+    var found: [RecognizedLine] = []
+    var requests = 0
+    let margin = CGFloat(max(60, lineHeight * 2))
+    let columnWidth = rect.width / CGFloat(signature.columns)
+    for band in bands {
+        // In pieces of at most about 1200 px: the tile this band is in has
+        // already shown that Vision gives up on it at full height.
+        let pieces = max(1, (band.count + 1199) / 1200)
+        for piece in 0 ..< pieces {
+            guard requests < 8 else { return found }
+            requests += 1
+            let rows = band.lowerBound + band.count * piece / pieces
+                ..< band.lowerBound + band.count * (piece + 1) / pieces
+            // And no wider than what is in it. Flat margins make the text
+            // small against the image, which is when Vision stops answering:
+            // a 3840×1200 piece with a column of 22 px text in its left third
+            // read nothing, the same rows cropped to the column read all of it.
+            var busyColumns: [Int] = []
+            for column in 0 ..< signature.columns {
+                var low = UInt8.max, high = UInt8.min
+                for row in rows {
+                    let sample = signature.samples[row * signature.columns + column]
+                    low = min(low, sample)
+                    high = max(high, sample)
+                }
+                if high > low, high - low > 24 { busyColumns.append(column) }
+            }
+            guard let firstColumn = busyColumns.first, let lastColumn = busyColumns.last else { continue }
+            let from = CGFloat(top + rows.lowerBound)
+            let to = CGFloat(top + rows.upperBound)
+            let left = rect.minX + CGFloat(firstColumn) * columnWidth - 40
+            let right = rect.minX + CGFloat(lastColumn + 1) * columnWidth + 40
+            let reread = CGRect(x: left, y: from - margin, width: right - left,
+                                height: to - from + margin * 2)
+                .intersection(rect.insetBy(dx: 0, dy: -margin))
+                .intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                .integral
+            found += try recognizeLines(in: image, rect: reread,
+                                        usesLanguageCorrection: usesLanguageCorrection)
+                .filter { $0.rect.midY >= from && $0.rect.midY < to }
+        }
+    }
+    return found
 }
 
 /// Runs the recognizer once on a blank image and throws the result away.
@@ -1409,24 +1621,38 @@ private let shutterSoundPath =
     "/System/Library/Components/CoreAudio.component/Contents/SharedSupport"
     + "/SystemSounds/system/Screen Capture.aif"
 
+/// Sounds still playing while the process carries on with something else.
+private var soundsInFlight: [NSSound] = []
+
 /// Plays a sound and waits for it, because a capture worker exits immediately
-/// afterwards and an unfinished NSSound dies with the process.
+/// afterwards and an unfinished NSSound dies with the process. Pass
+/// `waitFor: 0` when the process is known to outlive the sound.
 func playSound(atPath path: String, waitFor seconds: TimeInterval = 0.6) {
     guard FileManager.default.fileExists(atPath: path),
           let sound = NSSound(contentsOfFile: path, byReference: true)
     else { return }
     sound.play()
+    guard seconds > 0 else {
+        soundsInFlight.append(sound) // an unreferenced NSSound stops
+        return
+    }
     let deadline = Date(timeIntervalSinceNow: seconds)
     while sound.isPlaying, Date() < deadline {
         RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.02))
     }
 }
 
-func playShutter() { playSound(atPath: shutterSoundPath) }
+func playShutter(waitingUntilDone: Bool = true) {
+    playSound(atPath: shutterSoundPath, waitFor: waitingUntilDone ? 0.6 : 0)
+}
 
 /// The chime for "the long thing you started has finished". Distinct from the
 /// shutter so the two ends of a capture are not the same sound.
-func playCompletionChime() { playSound(atPath: "/System/Library/Sounds/Glass.aiff") }
+///
+/// Not waited for. The caller keeps its confirmation panel up for longer than
+/// the chime lasts, and waiting here as well put the first 0.6 s of it between
+/// a finished capture and its delivery.
+func playCompletionChime() { playSound(atPath: "/System/Library/Sounds/Glass.aiff", waitFor: 0) }
 
 /// Asks for notification permission. Called by the resident menu bar host.
 ///
@@ -1481,7 +1707,11 @@ func postNotificationIfAllowed(title: String, body: String) {
 /// the screen needs no permission, no daemon and no registration.
 func showHUD(_ message: String, seconds: TimeInterval = 2.2) {
     guard let panel = presentHUD(message) else { return }
+    dismissHUD(panel, after: seconds)
+}
 
+/// Leaves a HUD from `presentHUD` up for `seconds` more, then fades it out.
+func dismissHUD(_ panel: NSWindow, after seconds: TimeInterval) {
     let visibleUntil = Date(timeIntervalSinceNow: seconds)
     while Date() < visibleUntil {
         RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.03))
@@ -1583,6 +1813,13 @@ func writePNG(_ image: CGImage, to path: String) -> Bool {
     guard let destination = CGImageDestinationCreateWithURL(
         URL(fileURLWithPath: path) as CFURL, "public.png" as CFString, 1, nil)
     else { return false }
-    CGImageDestinationAddImage(destination, image, nil)
+    // One fixed row filter instead of ImageIO's default, which tries every
+    // filter on every row. Measured on real captures: a 5120×2880 photo-heavy
+    // screen 775 → 495 ms for 3% more bytes, UI and text shots 2.6× faster at
+    // the same size; a 3024×11700 stitched page 912 → 360 ms. "None" is faster
+    // still but costs 50% more bytes on anything photographic.
+    let options = [kCGImagePropertyPNGDictionary:
+                    [kCGImagePropertyPNGCompressionFilter: IMAGEIO_PNG_FILTER_SUB]] as CFDictionary
+    CGImageDestinationAddImage(destination, image, options)
     return CGImageDestinationFinalize(destination)
 }

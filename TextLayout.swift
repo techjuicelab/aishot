@@ -74,6 +74,148 @@ func withoutDuplicateLines(_ lines: [RecognizedLine]) -> [RecognizedLine] {
     return kept.sorted().map { lines[$0] }
 }
 
+// MARK: - windows across a wide capture
+
+/// What Vision read through one horizontal window of a strip of the capture.
+/// `minX`/`maxX` are the window's extent in the capture's pixels.
+struct RecognizedWindow {
+    var minX: CGFloat
+    var maxX: CGFloat
+    var lines: [RecognizedLine]
+}
+
+/// One set of lines from the overlapping windows of the same strip.
+///
+/// A line that lies wholly inside a window is read whole there. One that
+/// crosses a window's edge is read as far as the edge, and what comes back is
+/// a fragment ending — often mid-word — at the cut. So a fragment gives way to
+/// any whole line it overlaps on its row, and whole lines seen through two
+/// windows are kept once. Only a line longer than the overlap is cut in every
+/// window; its two fragments are joined on the text they share.
+func mergingWindows(_ windows: [RecognizedWindow], captureWidth: CGFloat) -> [RecognizedLine] {
+    guard windows.count > 1 else { return windows.first?.lines ?? [] }
+
+    func sameRow(_ a: CGRect, _ b: CGRect) -> Bool {
+        min(a.maxY, b.maxY) - max(a.minY, b.minY) >= min(a.height, b.height) * 0.5
+    }
+    func sharedWidth(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        max(0, min(a.maxX, b.maxX) - max(a.minX, b.minX))
+    }
+
+    var whole: [(window: Int, line: RecognizedLine)] = []
+    var fragments: [(window: Int, line: RecognizedLine)] = []
+    for (index, window) in windows.enumerated() {
+        for line in window.lines {
+            let slack = max(12, line.rect.height * 0.5)
+            let cutLeft = window.minX > 0 && line.rect.minX - window.minX <= slack
+            let cutRight = window.maxX < captureWidth && window.maxX - line.rect.maxX <= slack
+            if cutLeft || cutRight { fragments.append((index, line)) } else { whole.append((index, line)) }
+        }
+    }
+
+    // Whole lines: the same line seen through two windows is kept once.
+    var kept: [(window: Int, line: RecognizedLine)] = []
+    for candidate in whole {
+        let twin = kept.firstIndex { other in
+            other.window != candidate.window && sameRow(other.line.rect, candidate.line.rect)
+                && sharedWidth(other.line.rect, candidate.line.rect)
+                    >= min(other.line.rect.width, candidate.line.rect.width) * 0.8
+        }
+        if let twin {
+            if candidate.line.rect.width > kept[twin].line.rect.width { kept[twin] = candidate }
+        } else {
+            kept.append(candidate)
+        }
+    }
+
+    // Fragments: dropped where a whole line already covers the row there.
+    var loose: [(window: Int, line: RecognizedLine)] = []
+    for fragment in fragments {
+        let covered = kept.contains {
+            sameRow($0.line.rect, fragment.line.rect) && sharedWidth($0.line.rect, fragment.line.rect) > 0
+        }
+        if !covered { loose.append(fragment) }
+    }
+    // What is left was cut in every window that saw it. Two fragments of one
+    // line overlap on the row; join them, or failing that keep the longer.
+    var joined: [RecognizedLine] = []
+    for fragment in loose.sorted(by: { $0.line.rect.minX < $1.line.rect.minX }) {
+        if let last = joined.indices.last, sameRow(joined[last].rect, fragment.line.rect),
+           sharedWidth(joined[last].rect, fragment.line.rect) > 0 {
+            let left = joined[last]
+            let right = fragment.line
+            if let text = joiningCutFragments(left.text, right.text) {
+                joined[last] = RecognizedLine(rect: left.rect.union(right.rect), text: text,
+                                              confidence: min(left.confidence, right.confidence))
+            } else if right.rect.width > left.rect.width {
+                joined[last] = right
+            }
+        } else {
+            joined.append(fragment.line)
+        }
+    }
+    return kept.map(\.line) + joined
+}
+
+/// Joins the left and right fragments of one line on the longest run of text
+/// they share, or returns nil when they share too little to be sure. The
+/// characters next to each cut are not trusted: a glyph sliced by the window's
+/// edge is read as something else.
+func joiningCutFragments(_ left: String, _ right: String) -> String? {
+    let a = Array(left), b = Array(right)
+    guard a.count >= 8, b.count >= 8 else { return nil }
+    // Longest common substring, by dynamic programming over two short lines.
+    var best = (length: 0, endA: 0, endB: 0)
+    var previous = [Int](repeating: 0, count: b.count + 1)
+    for i in 1 ... a.count {
+        var current = [Int](repeating: 0, count: b.count + 1)
+        for j in 1 ... b.count where a[i - 1] == b[j - 1] {
+            current[j] = previous[j - 1] + 1
+            if current[j] > best.length { best = (current[j], i, j) }
+        }
+        previous = current
+    }
+    guard best.length >= 8 else { return nil }
+    return String(a[..<best.endA]) + String(b[best.endB...])
+}
+
+// MARK: - parts of a tile left unread
+
+/// Stretches of a tile, as row ranges, that show something and have no line
+/// read in them — where Vision answered for the rest of the tile and skipped
+/// this part. `busyRows` says which pixel rows hold more than flat background,
+/// `lineSpans` the rows each recognized line covers, `within` the rows this
+/// tile is responsible for.
+///
+/// A stretch has to be at least two lines tall and busy over a fifth of its
+/// height. The space between paragraphs is not busy, a rule or a border is too
+/// thin, and a single unread line is as likely a line Vision joined to its
+/// neighbour as one it missed. A picture does qualify, and costs one request
+/// that finds nothing.
+func unreadBands(busyRows: [Bool], lineSpans: [Range<Int>], within: Range<Int>,
+                 lineHeight: Int) -> [Range<Int>] {
+    var covered = [Bool](repeating: false, count: busyRows.count)
+    for span in lineSpans {
+        for row in max(0, span.lowerBound) ..< min(busyRows.count, span.upperBound) { covered[row] = true }
+    }
+    let minimum = max(60, lineHeight * 2)
+    var bands: [Range<Int>] = []
+    var row = max(0, within.lowerBound)
+    let end = min(busyRows.count, within.upperBound)
+    while row < end {
+        guard !covered[row] else { row += 1; continue }
+        var runEnd = row
+        while runEnd < end, !covered[runEnd] { runEnd += 1 }
+        let busy = (row ..< runEnd).filter { busyRows[$0] }
+        if let first = busy.first, let last = busy.last {
+            let band = first ..< last + 1
+            if band.count >= minimum, busy.count * 5 >= band.count { bands.append(band) }
+        }
+        row = runEnd
+    }
+    return bands
+}
+
 private enum LayoutPiece {
     case row([RecognizedLine])
     case columnBreak
