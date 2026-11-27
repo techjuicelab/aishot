@@ -97,8 +97,8 @@ struct HotkeyConfiguration: Codable, Equatable {
     var ocr: KeyboardShortcut?
     var iphonePhoto: KeyboardShortcut?
 
-    private static let defaultPhoto = KeyboardShortcut(keyCode: UInt32(kVK_ANSI_P),
-                                                        modifiers: UInt32(cmdKey | optionKey))
+    private static let defaultPhoto = KeyboardShortcut(keyCode: UInt32(kVK_ANSI_9),
+                                                        modifiers: UInt32(cmdKey | shiftKey))
 
     // macOS can reserve shift-command-3 through 7 for screenshots. Keep
     // scrolling capture outside that range and validate current system settings.

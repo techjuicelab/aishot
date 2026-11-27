@@ -61,7 +61,7 @@ already needs).
 
 ## Take a photo with iPhone
 
-Press <kbd>⌥⌘P</kbd> or choose **Take Photo with iPhone…** from the AIShot
+Press <kbd>⌘⇧9</kbd> or choose **Take Photo with iPhone…** from the AIShot
 menu. Take a picture on your nearby iPhone or iPad and tap **Use Photo**.
 AIShot saves it as a JPEG (`IMG_yyyyMMdd_HHmmss.jpg`) in your usual AIShot
 folder and delivers it using your existing destination and paste settings.
@@ -453,7 +453,7 @@ Karabiner and other launchers are optional.
 | Screenshot | <kbd>⌘⇧2</kbd> |
 | Scrolling screenshot | <kbd>⌘⇧8</kbd> |
 | Copy screenshot text | <kbd>⌘⇧1</kbd> |
-| Take a photo with iPhone | <kbd>⌥⌘P</kbd> |
+| Take a photo with iPhone | <kbd>⌘⇧9</kbd> |
 
 Open the **menu bar → Settings… → Keyboard Shortcuts** tab, click an action's button,
 and press the new combination. <kbd>Esc</kbd> cancels recording; <kbd>Delete</kbd>

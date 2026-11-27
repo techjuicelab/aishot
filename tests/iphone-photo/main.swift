@@ -11,18 +11,24 @@ let encoder = JSONEncoder()
 let legacy = try decoder.decode(HotkeyConfiguration.self, from: Data("""
 {"screenshot":{"keyCode":19,"modifiers":768}}
 """.utf8))
-let defaultPhoto = KeyboardShortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | optionKey))
+let defaultPhoto = KeyboardShortcut(keyCode: UInt32(kVK_ANSI_9), modifiers: UInt32(cmdKey | shiftKey))
+precondition(HotkeyConfiguration.defaults.iphonePhoto == defaultPhoto, "Expected ⇧⌘9 as the default iPhone shortcut")
 precondition(legacy.iphonePhoto == defaultPhoto)
 precondition(legacy.ocr == nil && legacy.scroll == nil)
 let legacyConflict = try decoder.decode(HotkeyConfiguration.self, from: Data("""
-{"screenshot":{"keyCode":35,"modifiers":2304}}
+{"screenshot":{"keyCode":25,"modifiers":768}}
 """.utf8))
 precondition(legacyConflict.screenshot == defaultPhoto && legacyConflict.iphonePhoto == nil)
+let explicitPhoto = try decoder.decode(HotkeyConfiguration.self, from: Data("""
+{"iphonePhoto":{"keyCode":35,"modifiers":2304}}
+""".utf8))
+precondition(explicitPhoto.iphonePhoto == KeyboardShortcut(keyCode: UInt32(kVK_ANSI_P),
+                                                         modifiers: UInt32(cmdKey | optionKey)))
 var disabled = legacy
 disabled.iphonePhoto = nil
 let roundTrip = try decoder.decode(HotkeyConfiguration.self, from: encoder.encode(disabled))
 precondition(roundTrip == disabled)
-print("PASS: legacy migration, conflict preservation, explicit disable")
+print("PASS: ⇧⌘9 default, legacy migration, conflict preservation, explicit shortcut and disable")
 
 let width = 80, height = 48
 
