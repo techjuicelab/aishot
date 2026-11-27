@@ -8,7 +8,7 @@ private final class ShortcutRecorderButton: NSButton {
 }
 
 final class HotkeySettingsView: NSView {
-    static let preferredHeight: CGFloat = 194
+    static let preferredHeight = CGFloat(92 + 34 * HotkeyAction.allCases.count)
 
     private(set) var configuration: HotkeyConfiguration
     var onValidationChanged: ((String?) -> Void)? {
@@ -78,6 +78,7 @@ final class HotkeySettingsView: NSView {
         case .screenshot: return t("일반 스크린샷", "Screenshot")
         case .scroll: return t("스크롤 스크린샷", "Scrolling screenshot")
         case .ocr: return t("스크린샷 텍스트 복사", "Copy screenshot text")
+        case .iphonePhoto: return action.displayName
         }
     }
 
@@ -115,7 +116,7 @@ final class HotkeySettingsView: NSView {
         }
 
         statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        statusLabel.frame = NSRect(x: 0, y: 140, width: 520, height: 48)
+        statusLabel.frame = NSRect(x: 0, y: Self.preferredHeight - 54, width: 520, height: 48)
         statusLabel.autoresizingMask = [.width]
         statusLabel.maximumNumberOfLines = 3
         addSubview(statusLabel)

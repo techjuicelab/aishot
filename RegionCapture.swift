@@ -319,22 +319,27 @@ private func regionCaptureTapCallback(proxy: CGEventTapProxy, type: CGEventType,
     return Unmanaged.passUnretained(event)
 }
 
-/// Creates the screenshot folder if needed, proves it is writable and returns
-/// the next free macOS-style file name in it — or nil, having said why.
-///
 /// The write probe surfaces the Files & Folders prompt (iCloud Drive, Desktop)
 /// before the capture UI, and unmasks a denied grant that would otherwise look
 /// exactly like an Esc-cancelled capture.
-func prepareScreenshotPath(in directory: String, now: Date = Date()) -> String? {
-    try? fm.createDirectory(atPath: directory, withIntermediateDirectories: true)
-    let probe = directory + "/.aishot-write-test"
-    guard fm.createFile(atPath: probe, contents: Data()) else {
+func prepareCaptureDirectory(_ directory: String) -> Bool {
+    let url = URL(fileURLWithPath: directory, isDirectory: true)
+    let probe = url.appendingPathComponent(".aishot-write-test-\(UUID().uuidString)")
+    do {
+        try fm.createDirectory(at: url, withIntermediateDirectories: true)
+        try Data().write(to: probe, options: .withoutOverwriting)
+        try fm.removeItem(at: probe)
+        return true
+    } catch {
         log("ERROR: cannot write to \(directory) — allow AIShot under System Settings → "
             + "Privacy & Security → Files and Folders")
-        return nil
+        return false
     }
-    try? fm.removeItem(atPath: probe)
+}
 
+/// Returns the next free macOS-style file name after checking the destination.
+func prepareScreenshotPath(in directory: String, now: Date = Date()) -> String? {
+    guard prepareCaptureDirectory(directory) else { return nil }
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.dateFormat = "yyyy-MM-dd 'at' h.mm.ss a"

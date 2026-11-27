@@ -259,6 +259,7 @@ var showSettings = false
 var showMenuBar = false
 var ocrMode = false // --ocr: region capture → recognized text on the clipboard
 var scrollMode = false // --scroll: pick a window and capture it all the way down
+var iphonePhotoMode = false // --iphone-photo: import a new photo via Continuity Camera
 var scrollWindowID: CGWindowID? // --window ID: skip the picker, scroll this window
 var listWindows = false // --list-windows: print the IDs --window accepts
 var scrollDebugDir: String? // --scroll-debug DIR: dump every raw frame and trace the run
@@ -299,7 +300,7 @@ while let arg = argIt.next() {
         assumeFrontRaw = value
     case "--no-paste":   paste = false
     case "--timeout":
-        guard let value = argIt.next(), let seconds = Double(value), seconds > 0 else {
+        guard let value = argIt.next(), let seconds = Double(value), seconds.isFinite, seconds > 0 else {
             fail("--timeout requires a positive number of seconds")
         }
         timeout = seconds
@@ -309,6 +310,7 @@ while let arg = argIt.next() {
     case "--menubar":    showMenuBar = true
     case "--ocr":        ocrMode = true
     case "--scroll":     scrollMode = true
+    case "--iphone-photo": iphonePhotoMode = true
     case "--window":
         guard let value = argIt.next(), let id = UInt32(value) else {
             fail("--window requires a numeric window ID (see --list-windows)")
@@ -341,6 +343,9 @@ while let arg = argIt.next() {
 guard ["auto", "path", "image"].contains(mode) else { fail("--mode must be auto|path|image") }
 guard !(ocrMode && scrollMode) else { fail("--ocr cannot be combined with scrolling capture") }
 guard !(deliverPath != nil && scrollMode) else { fail("--deliver cannot be combined with scrolling capture") }
+guard !iphonePhotoMode || !(ocrMode || scrollMode || deliverPath != nil || showMenuBar) else {
+    fail("--iphone-photo must be used as a standalone capture mode")
+}
 
 // The menu bar host starts this at login, in its own short-lived process, so
 // the one slow recognition after a macOS update happens here instead of on the
@@ -422,9 +427,11 @@ if installOnly {
 // Diagnostic and utility runs are deliberately left out: --self-test or
 // --list-windows against a build tree should report on that build tree, not
 // quietly relocate the app to /Applications.
+// An explicit iPhone capture can also run from a preview bundle. Capturing
+// should not replace the installed app or restart its menu bar host.
 // A standby worker is only ever started by the installed host.
 let mayAutoInstall = !showMenuBar && !selfTest && !listWindows && !chooseDir && !showSettings
-    && !ocrStandby
+    && !ocrStandby && !iphonePhotoMode
 if mayAutoInstall, Install.needsInstall() {
     if Install.needsRelocation() {
         // The copy that finishes the job is the one at the install location, and
@@ -571,6 +578,10 @@ func systemScreenshotFolder() -> String {
 // capture (or a focus return) back into AIShot.
 let front: NSRunningApplication? = {
     let observed = NSWorkspace.shared.frontmostApplication
+    if iphonePhotoMode, let assumed = assumeFrontRaw, assumed != "space.techjuicelab.aishot" {
+        return NSRunningApplication.runningApplications(withBundleIdentifier: assumed)
+            .first { !$0.isTerminated }
+    }
     guard observed?.bundleIdentifier == "space.techjuicelab.aishot" else { return observed }
     guard let assumed = assumeFrontRaw, assumed != "space.techjuicelab.aishot" else { return nil }
     return NSRunningApplication.runningApplications(withBundleIdentifier: assumed)
@@ -949,8 +960,13 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
     let shortcutTab = NSTabViewItem(identifier: "shortcuts")
     shortcutTab.label = t("단축키", "Keyboard Shortcuts")
     shortcutTab.view = shortcutPane
+    let photoEditor = PhonePhotoSettingsView(frame: generalPane.frame)
+    let photoTab = NSTabViewItem(identifier: "iphonePhotos")
+    photoTab.label = t("iPhone 사진", "iPhone Photos")
+    photoTab.view = photoEditor
     tabs.addTabViewItem(generalTab)
     tabs.addTabViewItem(shortcutTab)
+    tabs.addTabViewItem(photoTab)
     if shortcutEditor.validationMessage() != nil { tabs.selectTabViewItem(shortcutTab) }
 
     let alert = NSAlert()
@@ -962,13 +978,17 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
     alert.addButton(withTitle: t("저장", "Save"))
     alert.addButton(withTitle: t("취소", "Cancel"))
 
-    shortcutEditor.onValidationChanged = { [weak alert] message in
-        alert?.buttons.first?.isEnabled = message == nil
+    let updateSaveButton: () -> Void = { [weak alert, weak shortcutEditor, weak photoEditor] in
+        alert?.buttons.first?.isEnabled = shortcutEditor?.validationMessage() == nil
+            && photoEditor?.selectedSettings() != nil
     }
-    alert.buttons.first?.isEnabled = shortcutEditor.validationMessage() == nil
+    shortcutEditor.onValidationChanged = { _ in updateSaveButton() }
+    photoEditor.onValidationChanged = updateSaveButton
+    updateSaveButton()
     // A standalone settings run is only a fallback when the host is absent.
     // Its temporary manager verifies exclusive OS registration before saving.
     let validationManager = hotkeys ?? NativeHotkeyManager(onAction: { _ in })
+    let selectedPhotoSettings: PhonePhotoSettings
     while true {
         let response = withExtendedLifetime(controller) { alert.runModal() }
         shortcutEditor.finishRecording()
@@ -978,8 +998,13 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
             tabs.selectTabViewItem(shortcutTab)
             continue
         }
+        guard let photoSettings = photoEditor.selectedSettings() else {
+            tabs.selectTabViewItem(photoTab)
+            continue
+        }
         do {
             try validationManager.apply(shortcutEditor.configuration)
+            selectedPhotoSettings = photoSettings
             break
         } catch {
             shortcutEditor.showValidationError(error.localizedDescription)
@@ -1010,6 +1035,7 @@ func presentSettings(hotkeys: NativeHotkeyManager? = nil) -> Bool {
                              submitCheckbox.state == .on ? kCFBooleanTrue : kCFBooleanFalse, domain)
     CFPreferencesSetAppValue("dropoverAlso" as CFString,
                              dropoverCheckbox.state == .on ? kCFBooleanTrue : kCFBooleanFalse, domain)
+    selectedPhotoSettings.save()
     CFPreferencesAppSynchronize(domain)
     log(selectedID.isEmpty
         ? "destination set to Automatic"
@@ -1127,7 +1153,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         hotkeys.start()
         // Sparkle replaces the bundle without running --install. Perform the
         // one-time launcher migration on that startup path as well.
-        if hotkeys.registrationFailures.isEmpty { LegacyHotkeyMigration.runIfNeeded() }
+        if hotkeys.canMigrateLegacyBindings { LegacyHotkeyMigration.runIfNeeded() }
         for (action, status) in hotkeys.registrationFailures {
             log("shortcut unavailable: \(action.rawValue) (\(status)) — choose another shortcut in Settings")
         }
@@ -1197,6 +1223,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             action: #selector(captureScrollingScreenshot(_:)), keyEquivalent: "")
         scrollCaptureItem.target = self
         menu.addItem(scrollCaptureItem)
+
+        let photoItem = NSMenuItem(title: t("iPhone으로 사진 찍기…", "Take Photo with iPhone…"),
+                                   action: #selector(captureIPhonePhoto(_:)), keyEquivalent: "")
+        photoItem.target = self
+        menu.addItem(photoItem)
         menu.addItem(.separator())
 
         if destinationItem.submenu == nil {
@@ -1528,6 +1559,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         launchSibling(arguments: arguments, activates: false)
     }
 
+    @objc private func captureIPhonePhoto(_ sender: Any?) {
+        guard !settingsOpen, regionCapture == nil, !deliveryInProgress else { return }
+        var arguments = ["--iphone-photo"]
+        var source = lastExternalFront
+        if let observed = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+           observed != "space.techjuicelab.aishot" { source = observed }
+        if let source { arguments += ["--assume-front", source] }
+        launchSibling(arguments: arguments, activates: false)
+    }
+
     private func captureFromHotkey(_ action: HotkeyAction) {
         // Dispatch after Carbon's callback returns. Capture workers keep
         // the existing frontmost-app routing and cross-process capture lock.
@@ -1537,6 +1578,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             case .screenshot: self.captureScreenshot(nil)
             case .scroll: self.captureScrollingScreenshot(nil)
             case .ocr: self.copyScreenshotText(nil)
+            case .iphonePhoto: self.captureIPhonePhoto(nil)
             }
         }
     }
@@ -1568,7 +1610,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             Darwin.close(lock)
         }
         let saved = presentSettings(hotkeys: hotkeys)
-        if saved, hotkeys.registrationFailures.isEmpty { LegacyHotkeyMigration.runIfNeeded() }
+        if saved, hotkeys.canMigrateLegacyBindings { LegacyHotkeyMigration.runIfNeeded() }
         uiLanguage = currentUILanguage()
         rebuildMenu()
     }
@@ -2126,6 +2168,10 @@ if selfTest {
     for action in HotkeyAction.allCases {
         log("shortcut \(action.rawValue): \(shortcuts[action]?.displayString ?? "disabled")")
     }
+    if iphonePhotoMode {
+        let photo = PhonePhotoSettings.load()
+        log("iPhone photo settings: save \(photo.saveQuality.rawValue), paste \(photo.pasteQuality.rawValue)")
+    }
     if ocrMode {
         log("dir:            \(screenshotFolder())")
         log("screen-record:  \(CGPreflightScreenCaptureAccess() ? "granted" : "NOT granted")")
@@ -2261,9 +2307,76 @@ guard captureLock != nil else {
 }
 
 let savePath: String
+var photoPastePath: String?
+var pastePhotoAsJPEG = false
 if let deliverPath {
     guard fm.fileExists(atPath: deliverPath) else { fail("--deliver: no capture at \(deliverPath)") }
     savePath = deliverPath
+} else if iphonePhotoMode {
+    let directory = screenshotFolder()
+    guard prepareCaptureDirectory(directory) else {
+        showHUD(t("사진을 저장할 폴더에 쓸 수 없습니다.", "Unable to write to the photo save folder."))
+        exit(1)
+    }
+    let outcome = PhonePhotoCapture(timeout: timeout,
+                                    waitingLabel: t("iPhone 사진을 기다리는 중…", "Waiting for iPhone…"),
+                                    cancelLabel: t("취소", "Cancel")).run()
+    if NSRunningApplication.current.isActive { front?.activate(options: []) }
+    switch outcome {
+    case .photo(let source):
+        capturedAtUptime = ProcessInfo.processInfo.systemUptime
+        let settings = PhonePhotoSettings.load()
+        guard let jpeg = PhonePhoto.jpeg(from: source, quality: settings.saveQuality,
+                                         custom: settings.saveCustom) else {
+            log("iPhone photo: captured image could not be encoded as JPEG")
+            showHUD(t("iPhone 사진을 처리하지 못했습니다.", "Could not process the iPhone photo."))
+            exit(1)
+        }
+        let folder = URL(fileURLWithPath: directory, isDirectory: true)
+        let now = Date()
+        do {
+            savePath = try PhonePhoto.save(jpeg, in: folder, now: now).path
+        } catch {
+            log("iPhone photo save failed: \(error)")
+            showHUD(t("iPhone 사진을 저장하지 못했습니다.", "Could not save the iPhone photo."))
+            exit(1)
+        }
+        log("iPhone photo saved at \(savePath)")
+        if !deliversToShelfOnly, settings.pasteQuality != .saved {
+            let aiOptimized = settings.pasteQuality == .ai
+            let pasteImage = aiOptimized ? PhonePhoto.aiJPEG(from: source)
+                : PhonePhoto.jpeg(from: source, options: settings.pasteCustom)
+            if let pasteJPEG = pasteImage {
+                do {
+                    if pasteJPEG != jpeg {
+                        let suffix = aiOptimized ? "-AI" : "-Paste"
+                        photoPastePath = try PhonePhoto.save(pasteJPEG, in: folder, now: now, suffix: suffix).path
+                    }
+                    pastePhotoAsJPEG = true
+                } catch {
+                    log("iPhone photo: could not save the paste copy (\(error)); delivering the saved photo")
+                }
+            } else {
+                log("iPhone photo: could not encode the paste copy; delivering the saved photo")
+            }
+        }
+    case .cancelled:
+        log("iPhone photo cancelled")
+        exit(0)
+    case .unavailable:
+        log("iPhone photo: no available Continuity Camera photo action")
+        showHUD(t("iPhone을 찾을 수 없습니다. 잠금을 풀고 Mac 가까이에 두세요.",
+                  "iPhone unavailable. Unlock it and keep it near your Mac."))
+        exit(1)
+    case .timedOut:
+        log("iPhone photo timed out")
+        showHUD(t("iPhone 촬영 대기 시간이 지났습니다.", "Timed out waiting for the iPhone photo."))
+        exit(1)
+    case .invalidPhoto:
+        log("iPhone photo: attachment could not be read")
+        showHUD(t("iPhone에서 받은 사진을 읽지 못했습니다.", "Could not read the photo from your iPhone."))
+        exit(1)
+    }
 } else {
     // Without Screen Recording the shot would silently miss window contents and
     // the capture UI would race the permission dialog — prompt and bail instead;
@@ -2279,6 +2392,7 @@ if let deliverPath {
     }
     savePath = path
 }
+let deliveryPath = photoPastePath ?? savePath
 
 // What a scrolling capture puts on the clipboard, decided by the scrollOcrMode
 // preference. A stitched page is routinely 30,000+ px tall, and Claude
@@ -2531,7 +2645,7 @@ if scrollMode {
             completionAnnouncedAt = Date()
         }
     }
-} else if deliverPath == nil {
+} else if deliverPath == nil, !iphonePhotoMode {
     // The same session the menu bar host runs, for captures started by an
     // external launcher (`--capture`, `--ocr`) or by the host's fallback.
     let session = RegionCaptureSession(path: savePath, timeout: timeout)
@@ -2629,22 +2743,31 @@ if ocrMode {
 
 /// The image flavours of a capture for the clipboard, read and converted once.
 struct ClipboardImage {
-    let png: Data?
+    let data: Data?
+    let type: NSPasteboard.PasteboardType
     let tiff: Data?
 }
 
 func loadClipboardImage() -> ClipboardImage {
     // The image bytes may come from a bounded copy; see copyCaptureToPasteboard.
-    guard let png = fm.contents(atPath: scrollClipboardImagePath ?? savePath) else {
-        return ClipboardImage(png: nil, tiff: nil)
+    guard let data = fm.contents(atPath: scrollClipboardImagePath ?? deliveryPath) else {
+        return ClipboardImage(data: nil, type: .png, tiff: nil)
+    }
+    if iphonePhotoMode {
+        // The optimized and custom modes deliberately retain JPEG on the
+        // clipboard. Saved-quality mode keeps AIShot's usual PNG behavior.
+        if !pastePhotoAsJPEG, let png = PhonePhoto.png(from: data) {
+            return ClipboardImage(data: png, type: .png, tiff: nil)
+        }
+        return ClipboardImage(data: data, type: NSPasteboard.PasteboardType(UTType.jpeg.identifier), tiff: nil)
     }
     // The TIFF flavor exists for picky receivers, but it is uncompressed — a
     // stitched full-page capture decodes to a gigabyte-class buffer that the
     // pasteboard server refuses, and the failed set aborts nothing while
     // wasting seconds. PNG + file URL cover every destination we route to, so
     // past a sane size TIFF is skipped.
-    let tiff = png.count < 24_000_000 ? NSImage(data: png)?.tiffRepresentation : nil
-    return ClipboardImage(png: png, tiff: tiff)
+    let tiff = data.count < 24_000_000 ? NSImage(data: data)?.tiffRepresentation : nil
+    return ClipboardImage(data: data, type: .png, tiff: tiff)
 }
 
 /// Builds the clipboard image off the main thread while the run is waiting
@@ -2719,7 +2842,7 @@ let deliveredKind = scrollClipboardText != nil ? "ocr text" : pasteMode
 func copyCaptureToPasteboard() -> Int {
     pb.clearContents()
     if pasteMode == "path" {
-        pb.setString(shellEscape(savePath) + " ", forType: .string)
+        pb.setString(shellEscape(deliveryPath) + " ", forType: .string)
     } else if let text = scrollClipboardText {
         // textOnly / auto-tall scrolling capture: the recognized text stands in
         // for an image the destination model could not have read anyway.
@@ -2730,9 +2853,9 @@ func copyCaptureToPasteboard() -> Int {
         // points at the full-resolution capture, so anything resolving the
         // reference rather than the data still gets everything.
         let image = clipboardImage.get()
-        if let png = image.png { item.setData(png, forType: .png) }
+        if let data = image.data { item.setData(data, forType: image.type) }
         if let tiff = image.tiff { item.setData(tiff, forType: .tiff) }
-        item.setString(URL(fileURLWithPath: savePath).absoluteString, forType: .fileURL)
+        item.setString(URL(fileURLWithPath: deliveryPath).absoluteString, forType: .fileURL)
         pb.writeObjects([item])
     }
     return pb.changeCount

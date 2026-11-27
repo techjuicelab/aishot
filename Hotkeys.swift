@@ -4,13 +4,14 @@ import Carbon
 
 // Modifiers use Carbon's portable command/option/control/shift bit masks.
 enum HotkeyAction: String, CaseIterable, Codable, Hashable {
-    case screenshot, scroll, ocr
+    case screenshot, scroll, ocr, iphonePhoto
 
     var displayName: String {
         switch self {
         case .screenshot: return t("스크린샷", "Screenshot")
         case .scroll: return t("스크롤 스크린샷", "Scrolling Screenshot")
         case .ocr: return t("텍스트 복사", "Copy Text")
+        case .iphonePhoto: return t("iPhone으로 사진 찍기", "Take Photo with iPhone")
         }
     }
 }
@@ -94,14 +95,50 @@ struct HotkeyConfiguration: Codable, Equatable {
     var screenshot: KeyboardShortcut?
     var scroll: KeyboardShortcut?
     var ocr: KeyboardShortcut?
+    var iphonePhoto: KeyboardShortcut?
+
+    private static let defaultPhoto = KeyboardShortcut(keyCode: UInt32(kVK_ANSI_P),
+                                                        modifiers: UInt32(cmdKey | optionKey))
 
     // macOS can reserve shift-command-3 through 7 for screenshots. Keep
     // scrolling capture outside that range and validate current system settings.
     static let defaults = HotkeyConfiguration(
         screenshot: KeyboardShortcut(keyCode: 19, modifiers: UInt32(cmdKey | shiftKey)),
         scroll: KeyboardShortcut(keyCode: 28, modifiers: UInt32(cmdKey | shiftKey)),
-        ocr: KeyboardShortcut(keyCode: 18, modifiers: UInt32(cmdKey | shiftKey)))
-    static let disabled = HotkeyConfiguration(screenshot: nil, scroll: nil, ocr: nil)
+        ocr: KeyboardShortcut(keyCode: 18, modifiers: UInt32(cmdKey | shiftKey)),
+        iphonePhoto: defaultPhoto)
+    static let disabled = HotkeyConfiguration(screenshot: nil, scroll: nil, ocr: nil, iphonePhoto: nil)
+
+    private enum CodingKeys: String, CodingKey { case screenshot, scroll, ocr, iphonePhoto }
+
+    private init(screenshot: KeyboardShortcut?, scroll: KeyboardShortcut?, ocr: KeyboardShortcut?,
+                 iphonePhoto: KeyboardShortcut?) {
+        self.screenshot = screenshot
+        self.scroll = scroll
+        self.ocr = ocr
+        self.iphonePhoto = iphonePhoto
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        screenshot = try values.decodeIfPresent(KeyboardShortcut.self, forKey: .screenshot)
+        scroll = try values.decodeIfPresent(KeyboardShortcut.self, forKey: .scroll)
+        ocr = try values.decodeIfPresent(KeyboardShortcut.self, forKey: .ocr)
+        if values.contains(.iphonePhoto) {
+            iphonePhoto = try values.decodeIfPresent(KeyboardShortcut.self, forKey: .iphonePhoto)
+        } else if ![screenshot, scroll, ocr].contains(Self.defaultPhoto) {
+            iphonePhoto = Self.defaultPhoto
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encodeIfPresent(screenshot, forKey: .screenshot)
+        try values.encodeIfPresent(scroll, forKey: .scroll)
+        try values.encodeIfPresent(ocr, forKey: .ocr)
+        // Missing means old settings. An explicit null preserves a disabled shortcut.
+        try values.encode(iphonePhoto, forKey: .iphonePhoto)
+    }
 
     subscript(action: HotkeyAction) -> KeyboardShortcut? {
         get {
@@ -109,6 +146,7 @@ struct HotkeyConfiguration: Codable, Equatable {
             case .screenshot: return screenshot
             case .scroll: return scroll
             case .ocr: return ocr
+            case .iphonePhoto: return iphonePhoto
             }
         }
         set {
@@ -116,6 +154,7 @@ struct HotkeyConfiguration: Codable, Equatable {
             case .screenshot: screenshot = newValue
             case .scroll: scroll = newValue
             case .ocr: ocr = newValue
+            case .iphonePhoto: iphonePhoto = newValue
             }
         }
     }
@@ -191,7 +230,7 @@ enum NativeHotkeyPreferences {
     }
 
     fileprivate static func save(_ configuration: HotkeyConfiguration, domain: String) throws {
-        // One value commits all three actions together. An encoded nil means
+        // One value commits all actions together. An encoded nil means
         // disabled, whereas an absent preference means use the defaults.
         let previous = CFPreferencesCopyAppValue(key as CFString, domain as CFString)
         let data = try JSONEncoder().encode(configuration)
@@ -223,6 +262,11 @@ final class NativeHotkeyManager {
     private(set) var configuration: HotkeyConfiguration
     private(set) var registrationFailures: [HotkeyAction: OSStatus] = [:]
     private(set) var registrationIssues: [HotkeyAction: HotkeyValidationIssue] = [:]
+
+    // The old launcher never supplied AIShot's iPhone shortcut.
+    var canMigrateLegacyBindings: Bool {
+        registrationFailures.keys.allSatisfy { $0 == .iphonePhoto }
+    }
     private(set) var isSuspended = false
 
     init(preferencesDomain: String = NativeHotkeyPreferences.domain,

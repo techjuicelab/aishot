@@ -270,7 +270,7 @@ enum Install {
         NSApplication.shared.setActivationPolicy(.accessory)
         let probe = NativeHotkeyManager(onAction: { _ in })
         probe.start()
-        guard probe.registrationFailures.isEmpty else {
+        guard probe.canMigrateLegacyBindings else {
             log("hotkeys: keeping legacy bindings because a native shortcut is unavailable; choose another shortcut in Settings")
             return
         }

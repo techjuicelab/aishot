@@ -29,7 +29,7 @@ to the destination you chose from the [menu bar or Settings](#menu-bar):
 With any destination, **Also add each capture to a Dropover shelf** keeps the
 paste and puts the capture file in a Dropover shelf as well ([below](#dropover-shelf)).
 
-Every capture is also **saved as a file** with the native macOS naming
+Every screenshot is also **saved as a file** with the native macOS naming
 (`Screenshot 2026-07-08 at 11.09.27 AM.png`), so pasting and archiving happen
 in one motion.
 
@@ -58,6 +58,42 @@ A drag started before the overlay was on screen is not lost: AIShot holds it
 back from the window underneath and draws the same rectangle into the capture
 once the overlay is ready (this uses the Accessibility permission auto-paste
 already needs).
+
+## Take a photo with iPhone
+
+Press <kbd>⌥⌘P</kbd> or choose **Take Photo with iPhone…** from the AIShot
+menu. Take a picture on your nearby iPhone or iPad and tap **Use Photo**.
+AIShot saves it as a JPEG (`IMG_yyyyMMdd_HHmmss.jpg`) in your usual AIShot
+folder and delivers it using your existing destination and paste settings.
+Cancel from the iPhone or from the Mac waiting panel. Esc also cancels while
+AIShot is handling the capture. If you cancel, no device is available, or the
+import fails, the clipboard stays unchanged.
+
+Open **Settings → iPhone Photos** to set the saved photo and pasted photo
+separately. **Original size** keeps an incoming JPEG as received. **High** and
+**Save space** limit the long edge to 2,560 and 1,600 px, respectively. **Custom**
+lets you set the maximum long edge (320–12,000 px) and JPEG quality (40–100%).
+
+For pasting, **Use saved photo** is the default. **Optimize for AI** keeps an
+incoming JPEG as received when its long edge is at most 2,048 px and it is at
+most 1 MB. For other images it first tries
+a JPEG with a long edge of up to 2,048 px at 82% quality. AIShot compares the
+results of on-device Korean and English OCR with those from the received photo.
+If the smaller copy loses recognized text, AIShot uses a larger or full-size
+JPEG. The check can only compare text it recognizes in the received photo, so
+focus on small print when shooting. **Custom** lets you choose dimensions and
+compression, and smaller settings can make text harder to read.
+
+For **Optimize for AI** and **Custom**, apps receive the selected JPEG as an
+image or a file path, according to your paste settings. When the JPEG differs
+from the saved photo, AIShot saves it alongside with `-AI` or `-Paste` in the
+filename. **Use saved photo** follows AIShot's usual PNG or file path behavior.
+
+Use a nearby, unlocked iPhone or iPad. Keep Wi-Fi and Bluetooth on and sign in
+to the same Apple Account with two-factor authentication on both devices.
+Automatic paste uses AIShot's Accessibility permission. ContinuityCapture's
+hotkey trigger was verified on macOS 26.
+[Apple's Continuity Camera requirements](https://support.apple.com/en-us/102332)
 
 ## Copy text from a screenshot
 
@@ -187,6 +223,8 @@ for:
   to the clipboard.
 - **Capture Scrolling Screenshot…** — pick a window and capture all of it as
   one stitched image.
+- **Take Photo with iPhone…** — open the camera on a nearby iPhone or iPad and
+  deliver the photo to your usual destination.
 - **Destination: _current app_** — quickly switch between **Automatic
   (Frontmost App)** and installed presets. The current choice has a checkmark;
   **More Destinations in Settings…** opens the full picker.
@@ -209,8 +247,8 @@ open -gnb space.techjuicelab.aishot --args --menubar
 Open **AIShot menu bar → Settings…**. Choose a preset such as Claude,
 Antigravity, ChatGPT, Codex, Gemini, or Muse (Meta), or pick any installed `.app` with
 **Choose Other…**. Once a destination is set, **regular and scrolling screenshots
-go there regardless of which app was frontmost**. The dedicated **Copy Text from
-Screenshot…** mode always copies text to the clipboard instead.
+and iPhone photos go there regardless of which app was frontmost**. The dedicated
+**Copy Text from Screenshot…** mode always copies text to the clipboard.
 
 ### CLI agents in a terminal
 
@@ -415,11 +453,12 @@ Karabiner and other launchers are optional.
 | Screenshot | <kbd>⌘⇧2</kbd> |
 | Scrolling screenshot | <kbd>⌘⇧8</kbd> |
 | Copy screenshot text | <kbd>⌘⇧1</kbd> |
+| Take a photo with iPhone | <kbd>⌥⌘P</kbd> |
 
 Open the **menu bar → Settings… → Keyboard Shortcuts** tab, click an action's button,
 and press the new combination. <kbd>Esc</kbd> cancels recording; <kbd>Delete</kbd>
 without modifiers sets that action to **None**. **Restore Defaults** resets all
-three actions. Changes apply only after **Save**; **Cancel** keeps the previous
+shortcuts. Changes apply only after **Save**; **Cancel** keeps the previous
 settings. Duplicate combinations and conflicts with macOS or another app identify
 the affected action and prevent saving.
 
@@ -440,6 +479,7 @@ external launcher uses the same combination.
 open -gnb space.techjuicelab.aishot --args --capture
 open -gnb space.techjuicelab.aishot --args --scroll
 open -gnb space.techjuicelab.aishot --args --ocr
+open -gnb space.techjuicelab.aishot --args --iphone-photo
 ```
 
 Launching without arguments starts the menu bar host when it is not running
@@ -452,12 +492,12 @@ host at login, so AIShot does not need to be listed there.
 
 ## First-run permissions (one-time)
 
-1. First hotkey press → **Screen Recording** prompt appears and the app exits
+1. First screenshot hotkey press → **Screen Recording** prompt appears and the app exits
    (System Settings → Privacy & Security → Screen & System Audio Recording → allow AIShot).
 2. Press again → capture UI appears. On save, a **Files and Folders** prompt
    may appear for your screenshot folder (iCloud Drive / Desktop) — allow it,
    or nothing can be saved.
-3. After the first completed regular or scrolling capture → **Accessibility** prompt (for the
+3. After the first capture with automatic paste → **Accessibility** prompt (for the
    synthesized ⌘V). Until granted, AIShot still copies to the clipboard;
    once granted, pasting is automatic from the next shot on.
 
@@ -486,6 +526,7 @@ open -gnb space.techjuicelab.aishot --args --mode image
 | `--capture` | run one interactive capture and exit (explicit alias for no arguments while the host is running) | no-argument behavior |
 | `--ocr` | select an area, save the PNG, and copy recognized text only; ignores destination and auto-paste | — |
 | `--scroll` | pick a window and capture it top to bottom as one image | — |
+| `--iphone-photo` | take a photo on a nearby iPhone or iPad, save it as a JPEG, and deliver it to the configured destination | — |
 | `--window ID` | scroll-capture this window, skipping the picker (for scripts) | — |
 | `--list-windows` | print the window IDs `--window` accepts | — |
 | `--scroll-debug DIR` | write every raw frame to DIR and trace the run | — |
