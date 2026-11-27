@@ -6,8 +6,8 @@
 #
 # The Sparkle EdDSA private key is read from the login keychain, where
 # sign_update looks by default. On a Mac that keeps it only in 1Password, name
-# it instead and it is piped straight from `op` into sign_update for each
-# signature, never written to disk or to the keychain:
+# it instead. `op run` resolves it only for the per-artifact signing command,
+# which passes it to sign_update on standard input:
 #
 #   SPARKLE_ED_KEY_OP='op://Private/<item>/key.txt' ./release.sh 1.7
 #
@@ -140,7 +140,14 @@ rm -rf AIShot.app
 # copy. The SHA-256 is for installers that are not Sparkle.
 sign_of() {
   if [ -n "${SPARKLE_ED_KEY_OP:-}" ]; then
-    op read "$SPARKLE_ED_KEY_OP" | "$SIGN_UPDATE" --ed-key-file - "$1"
+    env OP_BIOMETRIC_UNLOCK_ENABLED=true AISHOT_SPARKLE_ED_KEY="$SPARKLE_ED_KEY_OP" \
+      op run -- /bin/zsh -fc '
+        setopt pipefail
+        print -rn -- "$AISHOT_SPARKLE_ED_KEY" | (
+          unset AISHOT_SPARKLE_ED_KEY
+          exec "$1" --ed-key-file - "$2"
+        )
+      ' aishot-sign "$SIGN_UPDATE" "$1"
   else
     "$SIGN_UPDATE" "$1"
   fi | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p'
